@@ -1,13 +1,11 @@
 -- ============================================================
 -- AUTO FARM LEVEL + FAR ATTACK (hợp nhất hdanhhub + redzhub)
 -- Cơ chế:
---   1. CheckLevel() → xác định quest/mob theo level hiện tại
+--   1. CheckLevel() → xác định quest/mob theo level
 --   2. Nhận quest tại NPC (Tween2 tới CFrameQuest)
---   3. Với mỗi mob trong Enemies:
---      - Teleport BKP cạnh mob (Tier 3)
---      - Bring mob về FarmPos (Tier 4)
---      - FireServer RegisterAttack(1e-9) + RegisterHit(hitList) (Tier 1+2)
---      - Nếu có signed remote → XOR bypass (Tier 5)
+--   3. Với mỗi mob: freeze mob tại FarmPos → teleport player 30 studs
+--      trên đầu mob (ghim liên tục bằng Heartbeat) → FireServer
+--      RegisterAttack(1e-9) + RegisterHit(hitList)
 -- Yêu cầu executor: cloneref, sethiddenproperty, bit32
 -- ============================================================
 
@@ -16,12 +14,11 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace         = game:GetService("Workspace")
 local TweenService      = game:GetService("TweenService")
 local VirtualUser       = game:GetService("VirtualUser")
-local VirtualInput      = game:GetService("VirtualInputManager")
 local RunService        = game:GetService("RunService")
 
 local LP = Players.LocalPlayer
 
--- Chờ module Net
+-- Module Net (chứa RE/RegisterAttack, RE/RegisterHit, seed)
 local Net       = ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Net")
 local RE_Attack = Net:WaitForChild("RE/RegisterAttack")
 local RE_Hit    = Net:WaitForChild("RE/RegisterHit")
@@ -30,15 +27,15 @@ local RE_Hit    = Net:WaitForChild("RE/RegisterHit")
 -- CẤU HÌNH
 -- ============================================================
 _G.AutoFarmLevel   = false
-_G.FarAttackRadius = 60       -- studs
-_G.FarAttackDelay  = 0.05     -- giây/lần
-_G.WeaponType      = "Melee"  -- "Melee"|"Sword"|"Blox Fruit"|"Gun"
+_G.FarAttackRadius = 60
+_G.FarAttackDelay  = 0.05
+_G.WeaponType      = "Melee"
 _G.UseBypass       = true
-_G.TeleportAbove   = true     -- BKP 30 studs trên đầu mob
-_G.BringMobs       = true     -- kéo mob về FarmPos
-_G.KillPercent     = 100      -- % máu tối thiểu để tiếp tục đánh
+_G.TeleportAbove   = true
+_G.BringMobs       = true
+_G.KillPercent     = 100
 
--- Biến trạng thái
+-- Trạng thái
 local Pos     = CFrame.new(0, 30, 0)
 local FarmPos = nil
 local MonFarm = nil
@@ -46,7 +43,6 @@ local Mon     = nil
 local NameMon, NameQuest, QuestLv
 local CFrameQ, CFrameMon
 local SelectWeapon = nil
-local SelectMonster = nil
 
 -- ============================================================
 -- QUÉT SIGNED REMOTE (bypass signature)
@@ -79,10 +75,10 @@ LP.Idled:Connect(function()
 end)
 
 -- ============================================================
--- TELEPORT MƯỢT (SafeMove — tránh server reject)
+-- TELEPORT (SafeMove)
 -- ============================================================
-local STEP_SIZE  = 60
-local STEP_WAIT  = 0.5
+local STEP_SIZE = 60
+local STEP_WAIT = 0.5
 local _moveThread = nil
 
 local function SafeMove(targetCF, checkStop)
@@ -90,7 +86,6 @@ local function SafeMove(targetCF, checkStop)
     if not char then return end
     local hrp = char:FindFirstChild("HumanoidRootPart")
     if not hrp then return end
-
     local targetPos = targetCF.Position
     while true do
         if checkStop and checkStop() then break end
@@ -115,13 +110,6 @@ local function Tween2(targetCF)
     end)
 end
 
-local function TweenBlock(targetCF)
-    if not targetCF then return end
-    if _moveThread then pcall(function() task.cancel(_moveThread) end) end
-    _moveThread = nil
-    SafeMove(targetCF, function() return false end)
-end
-
 local function BKP(cf)
     local char = LP.Character
     if not char then return end
@@ -133,7 +121,7 @@ local function BKP(cf)
 end
 
 -- ============================================================
--- TRANG BỊ VŨ KHÍ
+-- WEAPON
 -- ============================================================
 local function getWeaponByType()
     local char = LP.Character
@@ -181,13 +169,14 @@ local function AutoHaki()
 end
 
 -- ============================================================
--- CHECK LEVEL / QUEST (rút gọn Sea 1-2-3)
+-- CHECK LEVEL / QUEST
 -- ============================================================
 local function CheckLevel()
     local lvl = LP.Data.Level.Value
     local place = game.PlaceId
+
     if place == 2753915549 or place == 85211729168715 then
-        -- Sea 1
+        -- SEA 1
         if lvl <= 9 then
             Mon="Bandit"; NameMon="Bandit"; NameQuest="BanditQuest1"; QuestLv=1
             CFrameQ=CFrame.new(1059.37,15.45,1550.42)
@@ -293,8 +282,9 @@ local function CheckLevel()
             CFrameQ=CFrame.new(5259.82,37.35,4050.03)
             CFrameMon=CFrame.new(5441.95,42.50,4950.09)
         end
+
     elseif place == 4442272183 or place == 79091703265657 then
-        -- Sea 2 (rút gọn — dùng logic tương tự)
+        -- SEA 2
         if lvl <= 724 then
             Mon="Raider"; NameMon="Raider"; NameQuest="Area1Quest"; QuestLv=1
             CFrameQ=CFrame.new(-429.54,71.77,1836.18)
@@ -384,8 +374,9 @@ local function CheckLevel()
             CFrameQ=CFrame.new(-3054.44,235.54,-10142.82)
             CFrameMon=CFrame.new(-3352.90,285.02,-10534.84)
         end
+
     else
-        -- Sea 3 (rút gọn)
+        -- SEA 3
         if lvl <= 1524 then
             Mon="Pirate Millionaire"; NameMon="Pirate Millionaire"; NameQuest="PiratePortQuest"; QuestLv=1
             CFrameQ=CFrame.new(-450.10,107.68,5950.73)
@@ -459,7 +450,6 @@ local function CheckLevel()
             CFrameQ=CFrame.new(-9516.99,172.02,6078.47)
             CFrameMon=CFrame.new(-9582.02,6.25,6205.48)
         else
-            -- Trên 2075: dùng mob cuối biết
             Mon="Posessed Mummy"; NameMon="Posessed Mummy"; NameQuest="HauntedQuest2"; QuestLv=2
             CFrameQ=CFrame.new(-9516.99,172.02,6078.47)
             CFrameMon=CFrame.new(-9582.02,6.25,6205.48)
@@ -468,7 +458,7 @@ local function CheckLevel()
 end
 
 -- ============================================================
--- BẮN REMOTE
+-- FIRE REMOTE
 -- ============================================================
 local function fireAttack()
     pcall(function() RE_Attack:FireServer(1e-9) end)
@@ -494,7 +484,7 @@ local function fireHit(head, list)
 end
 
 -- ============================================================
--- SCAN TARGETS
+-- SCAN
 -- ============================================================
 local function scanTargets(radius, nameFilter)
     local char = LP.Character
@@ -523,11 +513,16 @@ local function scanTargets(radius, nameFilter)
 end
 
 -- ============================================================
--- VÒNG LẶP AUTO FARM LEVEL
+-- FARM LOOP (FIXED: freeze mob → teleport lơ lửng → ghim Heartbeat)
 -- ============================================================
 task.spawn(function()
     while task.wait(_G.FarAttackDelay) do
-        if not _G.AutoFarmLevel then continue end
+        if not _G.AutoFarmLevel then
+            FarmPos = nil
+            MonFarm = nil
+            continue
+        end
+
         local char = LP.Character
         if not char then continue end
         local hum = char:FindFirstChildOfClass("Humanoid")
@@ -538,11 +533,9 @@ task.spawn(function()
             CheckLevel()
             if not NameMon or not CFrameQ then return end
 
-            -- Trang bị vũ khí + bật haki
             equipWeapon(getWeaponByType())
             AutoHaki()
 
-            -- Kiểm tra quest
             local questVisible = false
             local questTitle = ""
             pcall(function()
@@ -552,16 +545,16 @@ task.spawn(function()
                 end
             end)
 
-            -- Nếu có quest khác → bỏ
             if questVisible and questTitle ~= "" and not string.find(questTitle, NameMon) then
                 MonFarm = nil
+                FarmPos = nil
                 ReplicatedStorage.Remotes.CommF_:InvokeServer("AbandonQuest")
                 return
             end
 
-            -- Chưa có quest → tới NPC nhận
             if not questVisible then
                 MonFarm = nil
+                FarmPos = nil
                 if (CFrameQ.Position - hrp.Position).Magnitude > 20 then
                     Tween2(CFrameQ)
                 else
@@ -571,38 +564,32 @@ task.spawn(function()
                 return
             end
 
-            -- Có quest đúng → farm mob
             if questVisible and string.find(questTitle, NameMon) then
-                -- Ưu tiên mob có sẵn
                 local list, head = scanTargets(_G.FarAttackRadius, Mon)
 
                 if #list > 0 then
-                    -- Tầng 3 + 4: BKP cạnh mob + bring mob
                     local targetMob = list[1][1]
                     local targetHrp = list[1][2]
 
-                    if _G.TeleportAbove then
-                        local dest = targetHrp.CFrame * Pos
-                        if (dest.Position - hrp.Position).Magnitude > 5 then
-                            BKP(dest)
-                        end
-                    end
+                    -- BƯỚC 1: Freeze mob tại FarmPos trước
+                    FarmPos = targetHrp.CFrame
+                    MonFarm = targetMob.Name
+                    pcall(function()
+                        sethiddenproperty(LP, "SimulationRadius", math.huge)
+                    end)
 
                     if _G.BringMobs then
-                        FarmPos = targetHrp.CFrame
-                        MonFarm = targetMob.Name
-                        pcall(function() sethiddenproperty(LP, "SimulationRadius", math.huge) end)
                         for _, t in ipairs(list) do
                             pcall(function()
                                 if t[2] and t[2].Parent then
-                                    t[2].CFrame    = FarmPos
-                                    t[2].Size      = Vector3.new(60, 60, 60)
+                                    t[2].CFrame       = FarmPos
+                                    t[2].Size         = Vector3.new(60, 60, 60)
                                     t[2].Transparency = 1
-                                    t[2].CanCollide = false
+                                    t[2].CanCollide   = false
                                     local h = t[1]:FindFirstChildOfClass("Humanoid")
                                     if h then
-                                        h.WalkSpeed  = 0
-                                        h.JumpPower  = 0
+                                        h.WalkSpeed = 0
+                                        h.JumpPower = 0
                                         local animator = h:FindFirstChild("Animator")
                                         if animator then animator:Destroy() end
                                     end
@@ -611,18 +598,43 @@ task.spawn(function()
                         end
                     end
 
-                    -- Bắn remote đánh xa
+                    -- BƯỚC 2: Teleport player lơ lửng 30 studs trên FarmPos
+                    if _G.TeleportAbove and FarmPos then
+                        BKP(FarmPos * Pos)
+                    end
+
+                    -- BƯỚC 3: Bắn remote
                     fireAttack()
                     fireHit(head, list)
 
                 else
-                    -- Không có mob → tween tới CFrameMon
                     MonFarm = nil
+                    FarmPos = nil
                     Tween2(CFrameMon)
                 end
             end
         end)
     end
+end)
+
+-- ============================================================
+-- GHIM PLAYER LƠ LỬNG LIÊN TỤC
+-- ============================================================
+RunService.Heartbeat:Connect(function()
+    if not _G.AutoFarmLevel then return end
+    if not _G.TeleportAbove then return end
+    if not FarmPos then return end
+
+    local char = LP.Character
+    if not char then return end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+
+    pcall(function()
+        hrp.CFrame = FarmPos * Pos
+        hrp.AssemblyLinearVelocity = Vector3.zero
+        hrp.AssemblyAngularVelocity = Vector3.zero
+    end)
 end)
 
 -- ============================================================
