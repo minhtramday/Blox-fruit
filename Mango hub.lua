@@ -1,7 +1,7 @@
 -- ============================================================
--- MANGO HUB 🥭 - Rayfield UI + Hover Farm (V10 - Strict Quest Filter)
+-- MANGO HUB 🥭 - Rayfield UI + Hover Farm (V12 - No Gather, Free Fly)
 -- Yêu cầu executor: cloneref, bit32, sethiddenproperty
--- Đã sửa: Bộ lọc tên quái tuyệt đối theo Quest, không gom nhầm quái.
+-- Đã sửa: Bỏ check Quest Title (fix kẹt NPC), tắt gom quái mặc định.
 -- ============================================================
 
 local Players           = game:GetService("Players")
@@ -25,15 +25,14 @@ _G.FarAttackRadius = 60
 _G.FarAttackDelay  = 0.05
 _G.WeaponType      = "Melee"
 _G.UseBypass       = true
-_G.MobHoverHeight  = 3
-_G.NPCHoverOffset  = 3
+_G.MobHoverHeight  = 5
+_G.NPCHoverOffset  = 5
 _G.HoverSpeed      = 150
-_G.BringMobs       = true
+_G.BringMobs       = false  -- TẮT MẶC ĐỊNH ĐỂ TRÁNH LỖI QUÁI BỊ KÉO VỀ 1 CHỖ
 
 -- State
 local _targetCF = nil
 local _targetMob = nil
-local _isNearMob = false
 local _currentTween = nil
 local Mon, NameMon, NameQuest, QuestLv, CFrameQ, CFrameMon
 
@@ -44,7 +43,7 @@ local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
 local Window = Rayfield:CreateWindow({
    Name = "MANGO HUB 🥭",
-   LoadingTitle = "Mango Hub V10",
+   LoadingTitle = "Mango Hub V12",
    LoadingSubtitle = "by AI",
    ConfigurationSaving = { Enabled = false },
    KeySystem = false,
@@ -347,7 +346,7 @@ end
 -- ============================================================
 -- SCAN + FIRE
 -- ============================================================
-local function scanTargets(radius, mobName)
+local function scanTargets(radius)
     local char = LP.Character
     if not char then return {}, nil end
     local hrp = char:FindFirstChild("HumanoidRootPart")
@@ -364,16 +363,13 @@ local function scanTargets(radius, mobName)
                     local mhum = mob:FindFirstChild("Humanoid")
                     if mhrp and mhum and mhum.Health > 0
                        and (mhrp.Position - origin).Magnitude <= radius then
-                        -- Bộ lọc tên quái: Nếu có truyền mobName, bắt buộc phải khớp
-                        if not mobName or mob.Name == mobName then
-                            for _, part in ipairs(mob:GetChildren()) do
-                                if part:IsA("BasePart") then
-                                    table.insert(list, {mob, part})
-                                end
+                        for _, part in ipairs(mob:GetChildren()) do
+                            if part:IsA("BasePart") then
+                                table.insert(list, {mob, part})
                             end
-                            if not firstHead then
-                                firstHead = mob:FindFirstChild("Head") or mhrp
-                            end
+                        end
+                        if not firstHead then
+                            firstHead = mob:FindFirstChild("Head") or mhrp
                         end
                     end
                 end
@@ -411,7 +407,7 @@ local function fireHit(head, list)
 end
 
 -- ============================================================
--- ATTACK LOOP (Lọc tên quái chặt chẽ)
+-- ATTACK LOOP
 -- ============================================================
 task.spawn(function()
     while task.wait(_G.FarAttackDelay) do
@@ -426,14 +422,11 @@ task.spawn(function()
         if w then equipWeapon(w) end
         AutoHaki()
 
-        -- Nếu đang farm, chỉ quét đúng tên quái của nhiệm vụ. Nếu không farm, quét tất cả.
-        local targetName = _G.AutoFarmLevel and Mon or nil
-        local list, head = scanTargets(_G.FarAttackRadius, targetName)
-        
-        -- Nếu không có quái nào đúng tên trong bán kính, bỏ qua
+        local list, head = scanTargets(_G.FarAttackRadius)
         if #list == 0 then continue end
 
-        if _G.BringMobs and (_isNearMob or not _G.AutoFarmLevel) then
+        -- Gom quái (nếu bật) về dưới chân
+        if _G.BringMobs then
             local hrp = char:FindFirstChild("HumanoidRootPart")
             if hrp then
                 local gatherPos = CFrame.new(hrp.Position.X, hrp.Position.Y - 3, hrp.Position.Z)
@@ -462,15 +455,18 @@ task.spawn(function()
 end)
 
 -- ============================================================
--- FARM LOOP (Kiểm tra chéo Quest và tìm quái)
+-- FARM LOOP (Tìm quái và cập nhật _targetCF)
 -- ============================================================
 task.spawn(function()
     while task.wait(0.1) do
         if not _G.AutoFarmLevel then
             _targetCF = nil
             _targetMob = nil
-            _isNearMob = false
             if _currentTween then pcall(function() _currentTween:Cancel() end); _currentTween = nil end
+            local char = LP.Character
+            if char and char:FindFirstChild("Humanoid") then
+                char.Humanoid.PlatformStand = false
+            end
             continue
         end
 
@@ -480,31 +476,21 @@ task.spawn(function()
         local hrp = char:FindFirstChild("HumanoidRootPart")
         if not hum or not hrp or hum.Health <= 0 then continue end
 
+        -- Bật PlatformStand để cơ thể lơ lửng
+        hum.PlatformStand = true
+
         pcall(function()
             CheckLevel()
             if not Mon or not CFrameQ then return end
 
             local questVisible = false
-            local questTitle = ""
             pcall(function()
                 questVisible = LP.PlayerGui.Main.Quest.Visible
-                if questVisible then
-                    questTitle = LP.PlayerGui.Main.Quest.Container.QuestTitle.Title.Text
-                end
             end)
 
-            -- Bắt buộc: Nếu có Quest nhưng SAI TÊN quái, tự động hủy
-            if questVisible and questTitle ~= "" and not string.find(questTitle, NameMon) then
-                ReplicatedStorage.Remotes.CommF_:InvokeServer("AbandonQuest")
-                _targetCF = nil
-                _targetMob = nil
-                return
-            end
-
-            -- Nếu chưa có Quest -> Bay tới NPC
+            -- 1. Chưa có Quest -> Bay tới NPC
             if not questVisible then
                 _targetMob = nil
-                _isNearMob = false
                 _targetCF = CFrameQ * CFrame.new(0, _G.NPCHoverOffset, 0)
                 if (hrp.Position - CFrameQ.Position).Magnitude <= 15 then
                     ReplicatedStorage.Remotes.CommF_:InvokeServer("StartQuest", NameQuest, QuestLv)
@@ -513,36 +499,23 @@ task.spawn(function()
                 return
             end
 
-            -- Tìm mob GẦN NHẤT có tên khớp với Quest
+            -- 2. Đã có Quest -> Tìm quái
+            local targetMob = nil
             local enemies = Workspace:FindFirstChild("Enemies")
-            local nearestMob, nearestDist = nil, math.huge
             if enemies then
-                for _, mob in ipairs(enemies:GetChildren()) do
-                    if mob.Name == Mon
-                    and mob:FindFirstChild("Humanoid")
-                    and mob:FindFirstChild("HumanoidRootPart")
-                    and mob.Humanoid.Health > 0 then
-                        local d = (mob.HumanoidRootPart.Position - hrp.Position).Magnitude
-                        if d < nearestDist then
-                            nearestDist = d
-                            nearestMob  = mob
-                        end
+                for _, v in pairs(enemies:GetChildren()) do
+                    if v.Name == Mon and v:FindFirstChild("Humanoid") and v:FindFirstChild("HumanoidRootPart") and v.Humanoid.Health > 0 then
+                        targetMob = v
+                        break
                     end
                 end
             end
 
-            if nearestMob then
-                _targetMob = nearestMob
-                _targetCF = nearestMob.HumanoidRootPart.CFrame * CFrame.new(0, _G.MobHoverHeight, 0)
-                -- Đánh dấu đã tới gần để cho phép gom
-                if nearestDist < 15 then
-                    _isNearMob = true
-                else
-                    _isNearMob = false
-                end
+            if targetMob then
+                _targetMob = targetMob
+                _targetCF = targetMob.HumanoidRootPart.CFrame * CFrame.new(0, _G.MobHoverHeight, 0)
             else
                 _targetMob = nil
-                _isNearMob = false
                 _targetCF = CFrameMon * CFrame.new(0, _G.MobHoverHeight, 0)
             end
         end)
@@ -550,7 +523,7 @@ task.spawn(function()
 end)
 
 -- ============================================================
--- MOVEMENT LOOP (Bay bằng Tween)
+-- MOVEMENT LOOP (Bay tới _targetCF bằng Tween)
 -- ============================================================
 task.spawn(function()
     while task.wait(0.05) do
@@ -570,6 +543,7 @@ task.spawn(function()
                 hrp.CFrame = CFrame.new(hrp.Position + (_targetCF.Position - hrp.Position).Unit * 2000)
             end
 
+            -- Nếu khoảng cách > 5, tween tới đích
             if (hrp.Position - _targetCF.Position).Magnitude > 5 then
                 if not _currentTween or _currentTween.PlaybackState ~= Enum.PlaybackState.Playing then
                     local dist = (hrp.Position - _targetCF.Position).Magnitude
@@ -578,6 +552,7 @@ task.spawn(function()
                     _currentTween:Play()
                 end
             else
+                -- Đã tới nơi, ghim chặt
                 if _currentTween then pcall(function() _currentTween:Cancel() end); _currentTween = nil end
                 hrp.CFrame = _targetCF
                 hrp.AssemblyLinearVelocity = Vector3.zero
@@ -596,16 +571,16 @@ FarmTab:CreateToggle({
    Flag = "AutoFarmLevel",
    Callback = function(Value)
        _G.AutoFarmLevel = Value
-       if not Value then _targetCF = nil; _targetMob = nil; _isNearMob = false end
+       if not Value then _targetCF = nil; _targetMob = nil end
    end,
 })
 
 FarmTab:CreateSlider({
-   Name = "Hover Height (Thấp)",
-   Range = {1, 20},
+   Name = "Hover Height",
+   Range = {3, 20},
    Increment = 1,
    Suffix = "studs",
-   CurrentValue = 3,
+   CurrentValue = 5,
    Flag = "MobHoverHeight",
    Callback = function(Value)
        _G.MobHoverHeight = Value
@@ -613,8 +588,8 @@ FarmTab:CreateSlider({
 })
 
 FarmTab:CreateToggle({
-   Name = "Gom Quái (Khi tới gần)",
-   CurrentValue = true,
+   Name = "Gom Quái (Bring Mobs)",
+   CurrentValue = false,
    Flag = "BringMobs",
    Callback = function(Value)
        _G.BringMobs = Value
@@ -674,4 +649,4 @@ SettingsTab:CreateToggle({
 })
 
 Rayfield:LoadConfiguration()
-print("[MANGO HUB] 🥭 V10 Loaded. Strict Quest Filter applied.")
+print("[MANGO HUB] 🥭 V12 Loaded. No Gather, Free Fly.")
