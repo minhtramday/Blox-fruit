@@ -1,14 +1,13 @@
 -- ============================================================
--- MANGO HUB 🥭 - Rayfield UI + Hover Farm (V7 - Smart Gather)
+-- MANGO HUB 🥭 - Rayfield UI + Hover Farm (V8 - Faithful Teleport)
 -- Yêu cầu executor: cloneref, bit32, sethiddenproperty
--- Fix: Chỉ gom mob khi đã tới gần, gom dính chùm dưới chân.
+-- Đã sửa: Dùng BKP (Teleport thẳng) thay vì Tween, ghim HRP mỗi frame.
 -- ============================================================
 
 local Players           = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace         = game:GetService("Workspace")
 local RunService        = game:GetService("RunService")
-local TweenService      = game:GetService("TweenService")
 local VirtualUser       = game:GetService("VirtualUser")
 
 local LP = Players.LocalPlayer
@@ -26,15 +25,13 @@ _G.FarAttackDelay  = 0.05
 _G.WeaponType      = "Melee"
 _G.UseBypass       = true
 _G.MobHoverHeight  = 3     -- Hover thấp xuống sát đầu mob
-_G.NPCHoverOffset  = 3     -- Hover thấp khi tới NPC
-_G.HoverSpeed      = 150
+_G.NPCHoverOffset  = 3
 _G.BringMobs       = true
 
 -- State
 local _targetCF = nil
 local _targetMob = nil
 local Mon, NameMon, NameQuest, QuestLv, CFrameQ, CFrameMon
-local _currentTween = nil
 
 -- ============================================================
 -- RAYFIELD UI
@@ -43,7 +40,7 @@ local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
 local Window = Rayfield:CreateWindow({
    Name = "MANGO HUB 🥭",
-   LoadingTitle = "Mango Hub V7",
+   LoadingTitle = "Mango Hub V8",
    LoadingSubtitle = "by AI",
    ConfigurationSaving = { Enabled = false },
    KeySystem = false,
@@ -125,6 +122,19 @@ local function AutoHaki()
     if char and not char:FindFirstChild("HasBuso") then
         pcall(function() ReplicatedStorage.Remotes.CommF_:InvokeServer("Buso") end)
     end
+end
+
+-- Teleport gốc (BKP)
+local function BKP(cf)
+    local char = LP.Character
+    if not char then return end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+    pcall(function()
+        hrp.CFrame = cf
+        task.wait()
+        hrp.CFrame = cf
+    end)
 end
 
 -- ============================================================
@@ -407,7 +417,7 @@ local function fireHit(head, list)
 end
 
 -- ============================================================
--- ATTACK LOOP (Đã sửa: Chỉ gom khi ở gần target)
+-- ATTACK LOOP (Gom quái & Bắn Hit)
 -- ============================================================
 task.spawn(function()
     while task.wait(_G.FarAttackDelay) do
@@ -428,37 +438,24 @@ task.spawn(function()
         if _G.BringMobs then
             local hrp = char:FindFirstChild("HumanoidRootPart")
             if hrp then
-                local playerPos = hrp.Position
-                local canGather = false
-                
-                -- Chỉ gom nếu đã ở gần con mob đích (khoảng cách < 20 studs)
-                if _targetMob and _targetMob.Parent and _targetMob:FindFirstChild("HumanoidRootPart") then
-                    if (playerPos - _targetMob.HumanoidRootPart.Position).Magnitude < 20 then
-                        canGather = true
-                    end
-                elseif not _G.AutoFarmLevel then
-                    canGather = true -- Nếu không bật Farm, vẫn gom nhưng chỉ gom mob sát bên
-                end
-
-                if canGather then
-                    local gatherPos = CFrame.new(playerPos.X, playerPos.Y - 3, playerPos.Z)
-                    for _, t in ipairs(list) do
-                        if t[1].Name == Mon or not _G.AutoFarmLevel then
-                            pcall(function()
-                                if t[2] and t[2].Parent then
-                                    t[2].CFrame = gatherPos
-                                    t[2].CanCollide = false
-                                    local h = t[1]:FindFirstChildOfClass("Humanoid")
-                                    if h then
-                                        h.WalkSpeed = 0
-                                        h.JumpPower = 0
-                                    end
-                                end
-                            end)
+                -- Gom quái về dưới chân người chơi (cách 3 studs)
+                local gatherPos = CFrame.new(hrp.Position.X, hrp.Position.Y - 3, hrp.Position.Z)
+                for _, t in ipairs(list) do
+                    pcall(function()
+                        if t[2] and t[2].Parent then
+                            t[2].CFrame = gatherPos
+                            t[2].CanCollide = false
+                            local h = t[1]:FindFirstChildOfClass("Humanoid")
+                            if h then
+                                h.WalkSpeed = 0
+                                h.JumpPower = 0
+                                local anim = h:FindFirstChild("Animator")
+                                if anim then anim:Destroy() end
+                            end
                         end
-                    end
-                    pcall(function() sethiddenproperty(LP, "SimulationRadius", math.huge) end)
+                    end)
                 end
+                pcall(function() sethiddenproperty(LP, "SimulationRadius", math.huge) end)
             end
         end
 
@@ -468,7 +465,7 @@ task.spawn(function()
 end)
 
 -- ============================================================
--- FARM LOOP (Tìm mob & Cập nhật vị trí đích)
+-- FARM LOOP (Tìm mob, cập nhật _targetCF)
 -- ============================================================
 task.spawn(function()
     while task.wait(0.1) do
@@ -524,12 +521,7 @@ task.spawn(function()
 
             if nearestMob then
                 _targetMob = nearestMob
-                -- Nếu đã ở rất gần (< 20 studs), giữ nguyên vị trí để đánh (không tween đi đâu nữa)
-                if nearestDist < 20 then
-                    _targetCF = hrp.CFrame 
-                else
-                    _targetCF = nearestMob.HumanoidRootPart.CFrame * CFrame.new(0, _G.MobHoverHeight, 0)
-                end
+                _targetCF = nearestMob.HumanoidRootPart.CFrame * CFrame.new(0, _G.MobHoverHeight, 0)
             else
                 _targetMob = nil
                 _targetCF = CFrameMon * CFrame.new(0, _G.MobHoverHeight, 0)
@@ -539,50 +531,26 @@ task.spawn(function()
 end)
 
 -- ============================================================
--- MOVEMENT LOOP (Tween di chuyển tới mob)
+-- MOVEMENT LOOP (Ghim vị trí bằng Heartbeat - Không rớt)
 -- ============================================================
-task.spawn(function()
-    while task.wait(0.05) do
-        if not _G.AutoFarmLevel then
-            if _currentTween then pcall(function() _currentTween:Cancel() end); _currentTween = nil end
-            continue
+RunService.Heartbeat:Connect(function()
+    if not _G.AutoFarmLevel then return end
+    if not _targetCF then return end
+
+    local char = LP.Character
+    if not char then return end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+
+    -- Teleport thẳng tới _targetCF (giống hệt logic BKP của script gốc)
+    -- Đồng thời triệt tiêu mọi lực vật lý kéo xuống
+    pcall(function()
+        if (hrp.Position - _targetCF.Position).Magnitude > 2 then
+            hrp.CFrame = _targetCF
         end
-
-        local char = LP.Character
-        if not char then continue end
-        local hrp = char:FindFirstChild("HumanoidRootPart")
-        local hum = char:FindFirstChild("Humanoid")
-        if not hrp or not hum then continue end
-
-        if _targetCF then
-            if (hrp.Position - _targetCF.Position).Magnitude > 3000 then
-                hrp.CFrame = CFrame.new(hrp.Position + (_targetCF.Position - hrp.Position).Unit * 2000)
-            end
-
-            -- Nếu khoảng cách > 5, tween tới đích
-            if (hrp.Position - _targetCF.Position).Magnitude > 5 then
-                if not _currentTween or _currentTween.PlaybackState ~= Enum.PlaybackState.Playing then
-                    local dist = (hrp.Position - _targetCF.Position).Magnitude
-                    local duration = math.max(dist / _G.HoverSpeed, 0.1)
-                    _currentTween = TweenService:Create(hrp, TweenInfo.new(duration, Enum.EasingStyle.Linear), {CFrame = _targetCF})
-                    _currentTween:Play()
-                end
-            else
-                -- Đã tới nơi, ghim chặt vị trí
-                if _currentTween then pcall(function() _currentTween:Cancel() end); _currentTween = nil end
-                hrp.CFrame = _targetCF
-                local bv = hrp:FindFirstChild("MangoHover")
-                if not bv then
-                    bv = Instance.new("BodyVelocity")
-                    bv.Name = "MangoHover"
-                    bv.MaxForce = Vector3.new(0, 1e5, 0)
-                    bv.Velocity = Vector3.zero
-                    bv.Parent = hrp
-                end
-                bv.Velocity = Vector3.zero
-            end
-        end
-    end
+        hrp.AssemblyLinearVelocity = Vector3.zero
+        hrp.AssemblyAngularVelocity = Vector3.zero
+    end)
 end)
 
 -- ============================================================
@@ -611,7 +579,7 @@ FarmTab:CreateSlider({
 })
 
 FarmTab:CreateToggle({
-   Name = "Gom Quái (Khi tới gần)",
+   Name = "Gom Quái (Dưới chân)",
    CurrentValue = true,
    Flag = "BringMobs",
    Callback = function(Value)
@@ -672,4 +640,4 @@ SettingsTab:CreateToggle({
 })
 
 Rayfield:LoadConfiguration()
-print("[MANGO HUB] 🥭 V7 Loaded. Smart Gather Fixed.")
+print("[MANGO HUB] 🥭 V8 Loaded. Faithful Teleport Method applied.")
