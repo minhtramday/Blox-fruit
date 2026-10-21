@@ -1,0 +1,762 @@
+-- ============================================================
+-- AUTO FARM LEVEL + FAR ATTACK (hợp nhất hdanhhub + redzhub)
+-- Cơ chế:
+--   1. CheckLevel() → xác định quest/mob theo level hiện tại
+--   2. Nhận quest tại NPC (Tween2 tới CFrameQuest)
+--   3. Với mỗi mob trong Enemies:
+--      - Teleport BKP cạnh mob (Tier 3)
+--      - Bring mob về FarmPos (Tier 4)
+--      - FireServer RegisterAttack(1e-9) + RegisterHit(hitList) (Tier 1+2)
+--      - Nếu có signed remote → XOR bypass (Tier 5)
+-- Yêu cầu executor: cloneref, sethiddenproperty, bit32
+-- ============================================================
+
+local Players           = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace         = game:GetService("Workspace")
+local TweenService      = game:GetService("TweenService")
+local VirtualUser       = game:GetService("VirtualUser")
+local VirtualInput      = game:GetService("VirtualInputManager")
+local RunService        = game:GetService("RunService")
+
+local LP = Players.LocalPlayer
+
+-- Chờ module Net
+local Net       = ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Net")
+local RE_Attack = Net:WaitForChild("RE/RegisterAttack")
+local RE_Hit    = Net:WaitForChild("RE/RegisterHit")
+
+-- ============================================================
+-- CẤU HÌNH
+-- ============================================================
+_G.AutoFarmLevel   = false
+_G.FarAttackRadius = 60       -- studs
+_G.FarAttackDelay  = 0.05     -- giây/lần
+_G.WeaponType      = "Melee"  -- "Melee"|"Sword"|"Blox Fruit"|"Gun"
+_G.UseBypass       = true
+_G.TeleportAbove   = true     -- BKP 30 studs trên đầu mob
+_G.BringMobs       = true     -- kéo mob về FarmPos
+_G.KillPercent     = 100      -- % máu tối thiểu để tiếp tục đánh
+
+-- Biến trạng thái
+local Pos     = CFrame.new(0, 30, 0)
+local FarmPos = nil
+local MonFarm = nil
+local Mon     = nil
+local NameMon, NameQuest, QuestLv
+local CFrameQ, CFrameMon
+local SelectWeapon = nil
+local SelectMonster = nil
+
+-- ============================================================
+-- QUÉT SIGNED REMOTE (bypass signature)
+-- ============================================================
+local signedRemote, signedId
+for _, container in ipairs({
+    ReplicatedStorage.Util, ReplicatedStorage.Common,
+    ReplicatedStorage.Remotes, ReplicatedStorage.Assets,
+    ReplicatedStorage.FX,
+}) do
+    for _, obj in ipairs(container:GetChildren()) do
+        if obj:IsA("RemoteEvent") and obj:GetAttribute("Id") then
+            signedRemote, signedId = obj, obj:GetAttribute("Id")
+        end
+    end
+    container.ChildAdded:Connect(function(o)
+        if o:IsA("RemoteEvent") and o:GetAttribute("Id") then
+            signedRemote, signedId = o, o:GetAttribute("Id")
+        end
+    end)
+end
+
+-- ============================================================
+-- ANTI-AFK
+-- ============================================================
+LP.Idled:Connect(function()
+    VirtualUser:Button2Down(Vector2.new(0, 0), workspace.CurrentCamera.CFrame)
+    task.wait(1)
+    VirtualUser:Button2Up(Vector2.new(0, 0), workspace.CurrentCamera.CFrame)
+end)
+
+-- ============================================================
+-- TELEPORT MƯỢT (SafeMove — tránh server reject)
+-- ============================================================
+local STEP_SIZE  = 60
+local STEP_WAIT  = 0.5
+local _moveThread = nil
+
+local function SafeMove(targetCF, checkStop)
+    local char = LP.Character
+    if not char then return end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+
+    local targetPos = targetCF.Position
+    while true do
+        if checkStop and checkStop() then break end
+        local cur = hrp.Position
+        local remaining = (targetPos - cur).Magnitude
+        if remaining < 8 then break end
+        local dir = (targetPos - cur).Unit
+        local step = math.min(remaining, STEP_SIZE)
+        local nextPos = cur + dir * step
+        local nextCF = remaining <= STEP_SIZE and targetCF or CFrame.new(nextPos)
+        pcall(function() hrp.CFrame = nextCF end)
+        task.wait(STEP_WAIT)
+    end
+end
+
+local function Tween2(targetCF)
+    if not targetCF then return end
+    if _moveThread then pcall(function() task.cancel(_moveThread) end) end
+    _moveThread = task.spawn(function()
+        SafeMove(targetCF, function() return _moveThread == nil end)
+        _moveThread = nil
+    end)
+end
+
+local function TweenBlock(targetCF)
+    if not targetCF then return end
+    if _moveThread then pcall(function() task.cancel(_moveThread) end) end
+    _moveThread = nil
+    SafeMove(targetCF, function() return false end)
+end
+
+local function BKP(cf)
+    local char = LP.Character
+    if not char then return end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+    hrp.CFrame = cf
+    task.wait()
+    hrp.CFrame = cf
+end
+
+-- ============================================================
+-- TRANG BỊ VŨ KHÍ
+-- ============================================================
+local function getWeaponByType()
+    local char = LP.Character
+    if not char then return nil end
+    local equipped = char:FindFirstChildOfClass("Tool")
+    if equipped then
+        local tip = equipped.ToolTip
+        if (_G.WeaponType == "Melee"      and tip == "Melee")
+        or (_G.WeaponType == "Sword"      and tip == "Sword")
+        or (_G.WeaponType == "Blox Fruit" and tip == "Blox Fruit")
+        or (_G.WeaponType == "Gun"        and tip == "Gun") then
+            return equipped
+        end
+    end
+    for _, t in ipairs(LP.Backpack:GetChildren()) do
+        if t:IsA("Tool") then
+            local tip = t.ToolTip
+            if (_G.WeaponType == "Melee"      and tip == "Melee")
+            or (_G.WeaponType == "Sword"      and tip == "Sword")
+            or (_G.WeaponType == "Blox Fruit" and tip == "Blox Fruit")
+            or (_G.WeaponType == "Gun"        and tip == "Gun") then
+                return t
+            end
+        end
+    end
+    return nil
+end
+
+local function equipWeapon(t)
+    local char = LP.Character
+    if not char or not t then return end
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if hum and t.Parent ~= char then
+        pcall(function() hum:EquipTool(t) end)
+    end
+end
+
+local function AutoHaki()
+    local char = LP.Character
+    if char and not char:FindFirstChild("HasBuso") then
+        pcall(function()
+            ReplicatedStorage.Remotes.CommF_:InvokeServer("Buso")
+        end)
+    end
+end
+
+-- ============================================================
+-- CHECK LEVEL / QUEST (rút gọn Sea 1-2-3)
+-- ============================================================
+local function CheckLevel()
+    local lvl = LP.Data.Level.Value
+    local place = game.PlaceId
+    if place == 2753915549 or place == 85211729168715 then
+        -- Sea 1
+        if lvl <= 9 then
+            Mon="Bandit"; NameMon="Bandit"; NameQuest="BanditQuest1"; QuestLv=1
+            CFrameQ=CFrame.new(1059.37,15.45,1550.42)
+            CFrameMon=CFrame.new(1045.96,27.00,1560.82)
+        elseif lvl <= 14 then
+            Mon="Monkey"; NameMon="Monkey"; NameQuest="JungleQuest"; QuestLv=1
+            CFrameQ=CFrame.new(-1598.09,35.55,153.38)
+            CFrameMon=CFrame.new(-1448.52,67.85,11.47)
+        elseif lvl <= 29 then
+            Mon="Gorilla"; NameMon="Gorilla"; NameQuest="JungleQuest"; QuestLv=2
+            CFrameQ=CFrame.new(-1598.09,35.55,153.38)
+            CFrameMon=CFrame.new(-1129.88,40.46,-525.42)
+        elseif lvl <= 39 then
+            Mon="Pirate"; NameMon="Pirate"; NameQuest="BuggyQuest1"; QuestLv=1
+            CFrameQ=CFrame.new(-1141.07,4.10,3831.55)
+            CFrameMon=CFrame.new(-1103.51,13.75,3896.09)
+        elseif lvl <= 59 then
+            Mon="Brute"; NameMon="Brute"; NameQuest="BuggyQuest1"; QuestLv=2
+            CFrameQ=CFrame.new(-1141.07,4.10,3831.55)
+            CFrameMon=CFrame.new(-1140.08,14.81,4322.92)
+        elseif lvl <= 74 then
+            Mon="Desert Bandit"; NameMon="Desert Bandit"; NameQuest="DesertQuest"; QuestLv=1
+            CFrameQ=CFrame.new(894.49,5.14,4392.43)
+            CFrameMon=CFrame.new(924.80,6.45,4481.59)
+        elseif lvl <= 89 then
+            Mon="Desert Officer"; NameMon="Desert Officer"; NameQuest="DesertQuest"; QuestLv=2
+            CFrameQ=CFrame.new(894.49,5.14,4392.43)
+            CFrameMon=CFrame.new(1608.28,8.61,4371.01)
+        elseif lvl <= 99 then
+            Mon="Snow Bandit"; NameMon="Snow Bandit"; NameQuest="SnowQuest"; QuestLv=1
+            CFrameQ=CFrame.new(1389.74,88.15,-1298.91)
+            CFrameMon=CFrame.new(1354.35,87.27,-1393.95)
+        elseif lvl <= 119 then
+            Mon="Snowman"; NameMon="Snowman"; NameQuest="SnowQuest"; QuestLv=2
+            CFrameQ=CFrame.new(1389.74,88.15,-1298.91)
+            CFrameMon=CFrame.new(1201.64,144.58,-1550.07)
+        elseif lvl <= 149 then
+            Mon="Chief Petty Officer"; NameMon="Chief Petty Officer"; NameQuest="MarineQuest2"; QuestLv=1
+            CFrameQ=CFrame.new(-5039.59,27.35,4324.68)
+            CFrameMon=CFrame.new(-4881.23,22.65,4273.75)
+        elseif lvl <= 174 then
+            Mon="Sky Bandit"; NameMon="Sky Bandit"; NameQuest="SkyQuest"; QuestLv=1
+            CFrameQ=CFrame.new(-4839.53,716.37,-2619.44)
+            CFrameMon=CFrame.new(-4953.21,295.74,-2899.23)
+        elseif lvl <= 189 then
+            Mon="Dark Master"; NameMon="Dark Master"; NameQuest="SkyQuest"; QuestLv=2
+            CFrameQ=CFrame.new(-4839.53,716.37,-2619.44)
+            CFrameMon=CFrame.new(-5259.84,391.40,-2229.04)
+        elseif lvl <= 209 then
+            Mon="Prisoner"; NameMon="Prisoner"; NameQuest="PrisonerQuest"; QuestLv=1
+            CFrameQ=CFrame.new(5308.93,1.66,475.12)
+            CFrameMon=CFrame.new(5098.97,-0.32,474.24)
+        elseif lvl <= 249 then
+            Mon="Dangerous Prisoner"; NameMon="Dangerous Prisoner"; NameQuest="PrisonerQuest"; QuestLv=2
+            CFrameQ=CFrame.new(5308.93,1.66,475.12)
+            CFrameMon=CFrame.new(5654.56,15.63,866.30)
+        elseif lvl <= 274 then
+            Mon="Toga Warrior"; NameMon="Toga Warrior"; NameQuest="ColosseumQuest"; QuestLv=1
+            CFrameQ=CFrame.new(-1580.05,6.35,-2986.48)
+            CFrameMon=CFrame.new(-1820.21,51.68,-2740.67)
+        elseif lvl <= 299 then
+            Mon="Gladiator"; NameMon="Gladiator"; NameQuest="ColosseumQuest"; QuestLv=2
+            CFrameQ=CFrame.new(-1580.05,6.35,-2986.48)
+            CFrameMon=CFrame.new(-1292.84,56.38,-3339.03)
+        elseif lvl <= 324 then
+            Mon="Military Soldier"; NameMon="Military Soldier"; NameQuest="MagmaQuest"; QuestLv=1
+            CFrameQ=CFrame.new(-5313.37,10.95,8515.29)
+            CFrameMon=CFrame.new(-5411.16,11.08,8454.29)
+        elseif lvl <= 374 then
+            Mon="Military Spy"; NameMon="Military Spy"; NameQuest="MagmaQuest"; QuestLv=2
+            CFrameQ=CFrame.new(-5313.37,10.95,8515.29)
+            CFrameMon=CFrame.new(-5802.87,86.26,8828.86)
+        elseif lvl <= 399 then
+            Mon="Fishman Warrior"; NameMon="Fishman Warrior"; NameQuest="FishmanQuest"; QuestLv=1
+            CFrameQ=CFrame.new(61122.65,18.50,1569.40)
+            CFrameMon=CFrame.new(60878.30,18.48,1543.76)
+        elseif lvl <= 449 then
+            Mon="Fishman Commando"; NameMon="Fishman Commando"; NameQuest="FishmanQuest"; QuestLv=2
+            CFrameQ=CFrame.new(61122.65,18.50,1569.40)
+            CFrameMon=CFrame.new(61922.63,18.48,1493.93)
+        elseif lvl <= 474 then
+            Mon="God's Guard"; NameMon="God's Guard"; NameQuest="SkyExp1Quest"; QuestLv=1
+            CFrameQ=CFrame.new(-4721.89,843.87,-1949.97)
+            CFrameMon=CFrame.new(-4710.04,845.28,-1927.31)
+        elseif lvl <= 524 then
+            Mon="Shanda"; NameMon="Shanda"; NameQuest="SkyExp1Quest"; QuestLv=2
+            CFrameQ=CFrame.new(-7859.10,5544.19,-381.48)
+            CFrameMon=CFrame.new(-7678.49,5566.40,-497.22)
+        elseif lvl <= 549 then
+            Mon="Royal Squad"; NameMon="Royal Squad"; NameQuest="SkyExp2Quest"; QuestLv=1
+            CFrameQ=CFrame.new(-7906.82,5634.66,-1411.99)
+            CFrameMon=CFrame.new(-7624.25,5658.13,-1467.35)
+        elseif lvl <= 624 then
+            Mon="Royal Soldier"; NameMon="Royal Soldier"; NameQuest="SkyExp2Quest"; QuestLv=2
+            CFrameQ=CFrame.new(-7906.82,5634.66,-1411.99)
+            CFrameMon=CFrame.new(-7836.75,5645.66,-1790.62)
+        elseif lvl <= 649 then
+            Mon="Galley Pirate"; NameMon="Galley Pirate"; NameQuest="FountainQuest"; QuestLv=1
+            CFrameQ=CFrame.new(5259.82,37.35,4050.03)
+            CFrameMon=CFrame.new(5551.02,78.90,3930.41)
+        else
+            Mon="Galley Captain"; NameMon="Galley Captain"; NameQuest="FountainQuest"; QuestLv=2
+            CFrameQ=CFrame.new(5259.82,37.35,4050.03)
+            CFrameMon=CFrame.new(5441.95,42.50,4950.09)
+        end
+    elseif place == 4442272183 or place == 79091703265657 then
+        -- Sea 2 (rút gọn — dùng logic tương tự)
+        if lvl <= 724 then
+            Mon="Raider"; NameMon="Raider"; NameQuest="Area1Quest"; QuestLv=1
+            CFrameQ=CFrame.new(-429.54,71.77,1836.18)
+            CFrameMon=CFrame.new(-728.33,52.78,2345.77)
+        elseif lvl <= 774 then
+            Mon="Mercenary"; NameMon="Mercenary"; NameQuest="Area1Quest"; QuestLv=2
+            CFrameQ=CFrame.new(-429.54,71.77,1836.18)
+            CFrameMon=CFrame.new(-1004.32,80.16,1424.62)
+        elseif lvl <= 799 then
+            Mon="Swan Pirate"; NameMon="Swan Pirate"; NameQuest="Area2Quest"; QuestLv=1
+            CFrameQ=CFrame.new(638.44,71.77,918.28)
+            CFrameMon=CFrame.new(1068.66,137.61,1322.11)
+        elseif lvl <= 874 then
+            Mon="Factory Staff"; NameMon="Factory Staff"; NameQuest="Area2Quest"; QuestLv=2
+            CFrameQ=CFrame.new(632.70,73.11,918.67)
+            CFrameMon=CFrame.new(73.08,81.86,-27.47)
+        elseif lvl <= 899 then
+            Mon="Marine Lieutenant"; NameMon="Marine Lieutenant"; NameQuest="MarineQuest3"; QuestLv=1
+            CFrameQ=CFrame.new(-2440.80,71.71,-3216.07)
+            CFrameMon=CFrame.new(-2821.37,75.90,-3070.09)
+        elseif lvl <= 949 then
+            Mon="Marine Captain"; NameMon="Marine Captain"; NameQuest="MarineQuest3"; QuestLv=2
+            CFrameQ=CFrame.new(-2440.80,71.71,-3216.07)
+            CFrameMon=CFrame.new(-1861.23,80.18,-3254.70)
+        elseif lvl <= 974 then
+            Mon="Zombie"; NameMon="Zombie"; NameQuest="ZombieQuest"; QuestLv=1
+            CFrameQ=CFrame.new(-5497.06,47.59,-795.24)
+            CFrameMon=CFrame.new(-5657.78,78.97,-928.69)
+        elseif lvl <= 999 then
+            Mon="Vampire"; NameMon="Vampire"; NameQuest="ZombieQuest"; QuestLv=2
+            CFrameQ=CFrame.new(-5497.06,47.59,-795.24)
+            CFrameMon=CFrame.new(-6037.67,32.18,-1340.66)
+        elseif lvl <= 1049 then
+            Mon="Snow Trooper"; NameMon="Snow Trooper"; NameQuest="SnowMountainQuest"; QuestLv=1
+            CFrameQ=CFrame.new(609.86,400.12,-5372.26)
+            CFrameMon=CFrame.new(549.15,427.39,-5563.70)
+        elseif lvl <= 1099 then
+            Mon="Winter Warrior"; NameMon="Winter Warrior"; NameQuest="SnowMountainQuest"; QuestLv=2
+            CFrameQ=CFrame.new(609.86,400.12,-5372.26)
+            CFrameMon=CFrame.new(1142.75,475.64,-5199.42)
+        elseif lvl <= 1124 then
+            Mon="Lab Subordinate"; NameMon="Lab Subordinate"; NameQuest="IceSideQuest"; QuestLv=1
+            CFrameQ=CFrame.new(-6064.07,15.24,-4902.98)
+            CFrameMon=CFrame.new(-5707.47,15.95,-4513.39)
+        elseif lvl <= 1174 then
+            Mon="Horned Warrior"; NameMon="Horned Warrior"; NameQuest="IceSideQuest"; QuestLv=2
+            CFrameQ=CFrame.new(-6064.07,15.24,-4902.98)
+            CFrameMon=CFrame.new(-6341.37,15.95,-5723.16)
+        elseif lvl <= 1199 then
+            Mon="Magma Ninja"; NameMon="Magma Ninja"; NameQuest="FireSideQuest"; QuestLv=1
+            CFrameQ=CFrame.new(-5428.03,15.06,-5299.43)
+            CFrameMon=CFrame.new(-5449.67,76.66,-5808.20)
+        elseif lvl <= 1249 then
+            Mon="Lava Pirate"; NameMon="Lava Pirate"; NameQuest="FireSideQuest"; QuestLv=2
+            CFrameQ=CFrame.new(-5428.03,15.06,-5299.43)
+            CFrameMon=CFrame.new(-5213.33,49.74,-4701.45)
+        elseif lvl <= 1274 then
+            Mon="Ship Deckhand"; NameMon="Ship Deckhand"; NameQuest="ShipQuest1"; QuestLv=1
+            CFrameQ=CFrame.new(1037.80,125.09,32911.60)
+            CFrameMon=CFrame.new(1212.01,150.79,33059.25)
+        elseif lvl <= 1299 then
+            Mon="Ship Engineer"; NameMon="Ship Engineer"; NameQuest="ShipQuest1"; QuestLv=2
+            CFrameQ=CFrame.new(1037.80,125.09,32911.60)
+            CFrameMon=CFrame.new(919.48,43.54,32779.97)
+        elseif lvl <= 1324 then
+            Mon="Ship Steward"; NameMon="Ship Steward"; NameQuest="ShipQuest2"; QuestLv=1
+            CFrameQ=CFrame.new(968.81,125.09,33244.13)
+            CFrameMon=CFrame.new(919.44,129.56,33436.04)
+        elseif lvl <= 1349 then
+            Mon="Ship Officer"; NameMon="Ship Officer"; NameQuest="ShipQuest2"; QuestLv=2
+            CFrameQ=CFrame.new(968.81,125.09,33244.13)
+            CFrameMon=CFrame.new(1036.02,181.44,33315.73)
+        elseif lvl <= 1374 then
+            Mon="Arctic Warrior"; NameMon="Arctic Warrior"; NameQuest="FrostQuest"; QuestLv=1
+            CFrameQ=CFrame.new(5667.66,26.80,-6486.09)
+            CFrameMon=CFrame.new(5966.25,62.97,-6179.38)
+        elseif lvl <= 1424 then
+            Mon="Snow Lurker"; NameMon="Snow Lurker"; NameQuest="FrostQuest"; QuestLv=2
+            CFrameQ=CFrame.new(5667.66,26.80,-6486.09)
+            CFrameMon=CFrame.new(5407.07,69.19,-6880.88)
+        elseif lvl <= 1449 then
+            Mon="Sea Soldier"; NameMon="Sea Soldier"; NameQuest="ForgottenQuest"; QuestLv=1
+            CFrameQ=CFrame.new(-3054.44,235.54,-10142.82)
+            CFrameMon=CFrame.new(-3028.22,64.67,-9775.43)
+        else
+            Mon="Water Fighter"; NameMon="Water Fighter"; NameQuest="ForgottenQuest"; QuestLv=2
+            CFrameQ=CFrame.new(-3054.44,235.54,-10142.82)
+            CFrameMon=CFrame.new(-3352.90,285.02,-10534.84)
+        end
+    else
+        -- Sea 3 (rút gọn)
+        if lvl <= 1524 then
+            Mon="Pirate Millionaire"; NameMon="Pirate Millionaire"; NameQuest="PiratePortQuest"; QuestLv=1
+            CFrameQ=CFrame.new(-450.10,107.68,5950.73)
+            CFrameMon=CFrame.new(-245.99,47.31,5584.10)
+        elseif lvl <= 1574 then
+            Mon="Pistol Billionaire"; NameMon="Pistol Billionaire"; NameQuest="PiratePortQuest"; QuestLv=2
+            CFrameQ=CFrame.new(-450.10,107.68,5950.73)
+            CFrameMon=CFrame.new(-54.81,83.77,5947.84)
+        elseif lvl <= 1599 then
+            Mon="Dragon Crew Warrior"; NameMon="Dragon Crew Warrior"; NameQuest="DragonCrewQuest"; QuestLv=1
+            CFrameQ=CFrame.new(6750.49,127.45,-711.03)
+            CFrameMon=CFrame.new(6709.76,52.34,-1139.03)
+        elseif lvl <= 1624 then
+            Mon="Dragon Crew Archer"; NameMon="Dragon Crew Archer"; NameQuest="DragonCrewQuest"; QuestLv=2
+            CFrameQ=CFrame.new(6750.49,127.45,-711.03)
+            CFrameMon=CFrame.new(6668.76,481.38,329.12)
+        elseif lvl <= 1649 then
+            Mon="Hydra Enforcer"; NameMon="Hydra Enforcer"; NameQuest="VenomCrewQuest"; QuestLv=1
+            CFrameQ=CFrame.new(5206.40,1004.10,748.35)
+            CFrameMon=CFrame.new(4547.12,1003.10,334.19)
+        elseif lvl <= 1699 then
+            Mon="Venomous Assailant"; NameMon="Venomous Assailant"; NameQuest="VenomCrewQuest"; QuestLv=2
+            CFrameQ=CFrame.new(5206.40,1004.10,748.35)
+            CFrameMon=CFrame.new(4674.93,1134.83,996.31)
+        elseif lvl <= 1724 then
+            Mon="Marine Commodore"; NameMon="Marine Commodore"; NameQuest="MarineTreeIsland"; QuestLv=1
+            CFrameQ=CFrame.new(2481.09,74.27,-6779.64)
+            CFrameMon=CFrame.new(2577.25,75.61,-7739.87)
+        elseif lvl <= 1774 then
+            Mon="Marine Rear Admiral"; NameMon="Marine Rear Admiral"; NameQuest="MarineTreeIsland"; QuestLv=2
+            CFrameQ=CFrame.new(2481.09,74.27,-6779.64)
+            CFrameMon=CFrame.new(3761.81,123.91,-6823.52)
+        elseif lvl <= 1799 then
+            Mon="Fishman Raider"; NameMon="Fishman Raider"; NameQuest="DeepForestIsland3"; QuestLv=1
+            CFrameQ=CFrame.new(-10581.66,330.87,-8761.19)
+            CFrameMon=CFrame.new(-10407.53,331.76,-8368.52)
+        elseif lvl <= 1824 then
+            Mon="Fishman Captain"; NameMon="Fishman Captain"; NameQuest="DeepForestIsland3"; QuestLv=2
+            CFrameQ=CFrame.new(-10581.66,330.87,-8761.19)
+            CFrameMon=CFrame.new(-10994.70,352.38,-9002.11)
+        elseif lvl <= 1849 then
+            Mon="Forest Pirate"; NameMon="Forest Pirate"; NameQuest="DeepForestIsland"; QuestLv=1
+            CFrameQ=CFrame.new(-13234.04,331.49,-7625.40)
+            CFrameMon=CFrame.new(-13274.48,332.38,-7769.58)
+        elseif lvl <= 1899 then
+            Mon="Mythological Pirate"; NameMon="Mythological Pirate"; NameQuest="DeepForestIsland"; QuestLv=2
+            CFrameQ=CFrame.new(-13234.04,331.49,-7625.40)
+            CFrameMon=CFrame.new(-13680.61,501.08,-6991.19)
+        elseif lvl <= 1924 then
+            Mon="Jungle Pirate"; NameMon="Jungle Pirate"; NameQuest="DeepForestIsland2"; QuestLv=1
+            CFrameQ=CFrame.new(-12680.38,389.97,-9902.02)
+            CFrameMon=CFrame.new(-12256.16,331.74,-10485.84)
+        elseif lvl <= 1974 then
+            Mon="Musketeer Pirate"; NameMon="Musketeer Pirate"; NameQuest="DeepForestIsland2"; QuestLv=2
+            CFrameQ=CFrame.new(-12680.38,389.97,-9902.02)
+            CFrameMon=CFrame.new(-13457.90,391.55,-9859.18)
+        elseif lvl <= 1999 then
+            Mon="Reborn Skeleton"; NameMon="Reborn Skeleton"; NameQuest="HauntedQuest1"; QuestLv=1
+            CFrameQ=CFrame.new(-9479.22,141.22,5566.09)
+            CFrameMon=CFrame.new(-8763.72,165.72,6159.86)
+        elseif lvl <= 2024 then
+            Mon="Living Zombie"; NameMon="Living Zombie"; NameQuest="HauntedQuest1"; QuestLv=2
+            CFrameQ=CFrame.new(-9479.22,141.22,5566.09)
+            CFrameMon=CFrame.new(-10144.13,138.63,5838.09)
+        elseif lvl <= 2049 then
+            Mon="Demonic Soul"; NameMon="Demonic Soul"; NameQuest="HauntedQuest2"; QuestLv=1
+            CFrameQ=CFrame.new(-9516.99,172.02,6078.47)
+            CFrameMon=CFrame.new(-9505.87,172.10,6158.99)
+        elseif lvl <= 2074 then
+            Mon="Posessed Mummy"; NameMon="Posessed Mummy"; NameQuest="HauntedQuest2"; QuestLv=2
+            CFrameQ=CFrame.new(-9516.99,172.02,6078.47)
+            CFrameMon=CFrame.new(-9582.02,6.25,6205.48)
+        else
+            -- Trên 2075: dùng mob cuối biết
+            Mon="Posessed Mummy"; NameMon="Posessed Mummy"; NameQuest="HauntedQuest2"; QuestLv=2
+            CFrameQ=CFrame.new(-9516.99,172.02,6078.47)
+            CFrameMon=CFrame.new(-9582.02,6.25,6205.48)
+        end
+    end
+end
+
+-- ============================================================
+-- BẮN REMOTE
+-- ============================================================
+local function fireAttack()
+    pcall(function() RE_Attack:FireServer(1e-9) end)
+end
+
+local function fireHit(head, list)
+    if _G.UseBypass and signedRemote and signedId then
+        pcall(function()
+            local fakeName = string.gsub("RE/RegisterHit", ".", function(ch)
+                return string.char(bit32.bxor(
+                    string.byte(ch),
+                    math.floor(workspace:GetServerTimeNow() / 10 % 10) + 1
+                ))
+            end)
+            local seed = 0
+            pcall(function() seed = Net.seed:InvokeServer() * 2 end)
+            local sig = bit32.bxor(signedId + 909090, seed)
+            cloneref(signedRemote):FireServer(fakeName, sig, head, list)
+        end)
+    else
+        pcall(function() RE_Hit:FireServer(head, list) end)
+    end
+end
+
+-- ============================================================
+-- SCAN TARGETS
+-- ============================================================
+local function scanTargets(radius, nameFilter)
+    local char = LP.Character
+    if not char then return {}, nil end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return {}, nil end
+    local origin, list, firstHead = hrp.Position, {}, nil
+
+    local enemies = Workspace:FindFirstChild("Enemies")
+    if not enemies then return {}, nil end
+    for _, mob in ipairs(enemies:GetChildren()) do
+        if (not nameFilter or mob.Name == nameFilter) then
+            local mhrp = mob:FindFirstChild("HumanoidRootPart")
+            local mhum = mob:FindFirstChild("Humanoid")
+            if mhrp and mhum and mhum.Health > 0 then
+                if (mhrp.Position - origin).Magnitude <= radius then
+                    table.insert(list, {mob, mhrp})
+                    if not firstHead then
+                        firstHead = mob:FindFirstChild("Head") or mhrp
+                    end
+                end
+            end
+        end
+    end
+    return list, firstHead
+end
+
+-- ============================================================
+-- VÒNG LẶP AUTO FARM LEVEL
+-- ============================================================
+task.spawn(function()
+    while task.wait(_G.FarAttackDelay) do
+        if not _G.AutoFarmLevel then continue end
+        local char = LP.Character
+        if not char then continue end
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        local hrp = char:FindFirstChild("HumanoidRootPart")
+        if not hum or not hrp or hum.Health <= 0 then continue end
+
+        pcall(function()
+            CheckLevel()
+            if not NameMon or not CFrameQ then return end
+
+            -- Trang bị vũ khí + bật haki
+            equipWeapon(getWeaponByType())
+            AutoHaki()
+
+            -- Kiểm tra quest
+            local questVisible = false
+            local questTitle = ""
+            pcall(function()
+                questVisible = LP.PlayerGui.Main.Quest.Visible
+                if questVisible then
+                    questTitle = LP.PlayerGui.Main.Quest.Container.QuestTitle.Title.Text
+                end
+            end)
+
+            -- Nếu có quest khác → bỏ
+            if questVisible and questTitle ~= "" and not string.find(questTitle, NameMon) then
+                MonFarm = nil
+                ReplicatedStorage.Remotes.CommF_:InvokeServer("AbandonQuest")
+                return
+            end
+
+            -- Chưa có quest → tới NPC nhận
+            if not questVisible then
+                MonFarm = nil
+                if (CFrameQ.Position - hrp.Position).Magnitude > 20 then
+                    Tween2(CFrameQ)
+                else
+                    ReplicatedStorage.Remotes.CommF_:InvokeServer("StartQuest", NameQuest, QuestLv)
+                    task.wait(0.3)
+                end
+                return
+            end
+
+            -- Có quest đúng → farm mob
+            if questVisible and string.find(questTitle, NameMon) then
+                -- Ưu tiên mob có sẵn
+                local list, head = scanTargets(_G.FarAttackRadius, Mon)
+
+                if #list > 0 then
+                    -- Tầng 3 + 4: BKP cạnh mob + bring mob
+                    local targetMob = list[1][1]
+                    local targetHrp = list[1][2]
+
+                    if _G.TeleportAbove then
+                        local dest = targetHrp.CFrame * Pos
+                        if (dest.Position - hrp.Position).Magnitude > 5 then
+                            BKP(dest)
+                        end
+                    end
+
+                    if _G.BringMobs then
+                        FarmPos = targetHrp.CFrame
+                        MonFarm = targetMob.Name
+                        pcall(function() sethiddenproperty(LP, "SimulationRadius", math.huge) end)
+                        for _, t in ipairs(list) do
+                            pcall(function()
+                                if t[2] and t[2].Parent then
+                                    t[2].CFrame    = FarmPos
+                                    t[2].Size      = Vector3.new(60, 60, 60)
+                                    t[2].Transparency = 1
+                                    t[2].CanCollide = false
+                                    local h = t[1]:FindFirstChildOfClass("Humanoid")
+                                    if h then
+                                        h.WalkSpeed  = 0
+                                        h.JumpPower  = 0
+                                        local animator = h:FindFirstChild("Animator")
+                                        if animator then animator:Destroy() end
+                                    end
+                                end
+                            end)
+                        end
+                    end
+
+                    -- Bắn remote đánh xa
+                    fireAttack()
+                    fireHit(head, list)
+
+                else
+                    -- Không có mob → tween tới CFrameMon
+                    MonFarm = nil
+                    Tween2(CFrameMon)
+                end
+            end
+        end)
+    end
+end)
+
+-- ============================================================
+-- GUI
+-- ============================================================
+local gui = Instance.new("ScreenGui")
+gui.Name = "AutoFarmFarAttack"
+gui.ResetOnSpawn = false
+gui.Parent = LP:WaitForChild("PlayerGui")
+
+local frame = Instance.new("Frame")
+frame.Size             = UDim2.new(0, 260, 0, 320)
+frame.Position         = UDim2.new(0, 20, 0.5, -160)
+frame.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
+frame.BorderSizePixel  = 0
+frame.Active           = true
+frame.Draggable        = true
+frame.Parent           = gui
+
+local title = Instance.new("TextLabel")
+title.Size             = UDim2.new(1, 0, 0, 32)
+title.BackgroundColor3 = Color3.fromRGB(60, 60, 70)
+title.BorderSizePixel  = 0
+title.Text             = "FARM LEVEL + FAR ATTACK"
+title.TextColor3       = Color3.fromRGB(255, 255, 255)
+title.Font             = Enum.Font.GothamBold
+title.TextSize         = 13
+title.Parent           = frame
+
+local toggleBtn = Instance.new("TextButton")
+toggleBtn.Size             = UDim2.new(1, -20, 0, 40)
+toggleBtn.Position         = UDim2.new(0, 10, 0, 42)
+toggleBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+toggleBtn.BorderSizePixel  = 0
+toggleBtn.Text             = "BẬT FARM"
+toggleBtn.TextColor3       = Color3.fromRGB(255, 255, 255)
+toggleBtn.Font             = Enum.Font.GothamBold
+toggleBtn.TextSize         = 14
+toggleBtn.Parent           = frame
+toggleBtn.MouseButton1Click:Connect(function()
+    _G.AutoFarmLevel = not _G.AutoFarmLevel
+    toggleBtn.Text = _G.AutoFarmLevel and "TẮT FARM" or "BẬT FARM"
+    toggleBtn.BackgroundColor3 = _G.AutoFarmLevel
+        and Color3.fromRGB(50, 200, 50)
+        or  Color3.fromRGB(200, 50, 50)
+end)
+
+local function makeLabel(text, y)
+    local l = Instance.new("TextLabel")
+    l.Size                   = UDim2.new(1, -20, 0, 18)
+    l.Position               = UDim2.new(0, 10, 0, y)
+    l.BackgroundTransparency = 1
+    l.Text                   = text
+    l.TextColor3             = Color3.fromRGB(200, 200, 200)
+    l.Font                   = Enum.Font.Gotham
+    l.TextSize               = 11
+    l.TextXAlignment         = Enum.TextXAlignment.Left
+    l.Parent                 = frame
+    return l
+end
+
+local function makeBox(text, y)
+    local b = Instance.new("TextBox")
+    b.Size             = UDim2.new(1, -20, 0, 24)
+    b.Position         = UDim2.new(0, 10, 0, y)
+    b.BackgroundColor3 = Color3.fromRGB(45, 45, 55)
+    b.BorderSizePixel  = 0
+    b.Text             = text
+    b.TextColor3       = Color3.fromRGB(255, 255, 255)
+    b.Font             = Enum.Font.Gotham
+    b.TextSize         = 12
+    b.Parent           = frame
+    return b
+end
+
+makeLabel("Bán kính (studs):", 92)
+local radiusBox = makeBox("60", 112)
+radiusBox.FocusLost:Connect(function()
+    local v = tonumber(radiusBox.Text)
+    if v and v > 0 and v <= 500 then _G.FarAttackRadius = v end
+end)
+
+makeLabel("Delay (giây):", 142)
+local delayBox = makeBox("0.05", 162)
+delayBox.FocusLost:Connect(function()
+    local v = tonumber(delayBox.Text)
+    if v and v >= 0.01 and v <= 5 then _G.FarAttackDelay = v end
+end)
+
+makeLabel("Vũ khí (Melee/Sword/Blox Fruit/Gun):", 192)
+local weaponBox = makeBox("Melee", 212)
+weaponBox.FocusLost:Connect(function()
+    local v = weaponBox.Text
+    if v == "Melee" or v == "Sword" or v == "Blox Fruit" or v == "Gun" then
+        _G.WeaponType = v
+    else
+        weaponBox.Text = _G.WeaponType
+    end
+end)
+
+makeLabel("Bypass signature (true/false):", 242)
+local bypassBox = makeBox("true", 262)
+bypassBox.FocusLost:Connect(function()
+    _G.UseBypass = (bypassBox.Text:lower() == "true")
+end)
+
+local statusLbl = Instance.new("TextLabel")
+statusLbl.Size                   = UDim2.new(1, -20, 0, 24)
+statusLbl.Position               = UDim2.new(0, 10, 0, 288)
+statusLbl.BackgroundTransparency = 1
+statusLbl.Text                   = "Sẵn sàng"
+statusLbl.TextColor3             = Color3.fromRGB(150, 255, 150)
+statusLbl.Font                   = Enum.Font.Gotham
+statusLbl.TextSize               = 11
+statusLbl.TextXAlignment         = Enum.TextXAlignment.Left
+statusLbl.Parent                 = frame
+
+task.spawn(function()
+    while task.wait(0.5) do
+        if _G.AutoFarmLevel then
+            local n = 0
+            pcall(function()
+                CheckLevel()
+                local list = scanTargets(_G.FarAttackRadius, Mon)
+                n = #list
+            end)
+            statusLbl.Text = "Farm: " .. tostring(Mon or "?")
+                .. " | Mục tiêu: " .. n
+            statusLbl.TextColor3 = Color3.fromRGB(150, 255, 150)
+        else
+            statusLbl.Text = "Sẵn sàng"
+            statusLbl.TextColor3 = Color3.fromRGB(150, 150, 150)
+        end
+    end
+end)
+
+print("[FarmFarAttack] Loaded. GUI ở góc trái màn hình.")
