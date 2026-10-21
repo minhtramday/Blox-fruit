@@ -1,7 +1,7 @@
 -- ============================================================
--- MANGO HUB 🥭 - Rayfield UI + Hover Farm (V5 - Faithful Logic)
+-- MANGO HUB 🥭 - Rayfield UI + Hover Farm (V6 - Normal Size, Low Hover)
 -- Yêu cầu executor: cloneref, bit32, sethiddenproperty
--- Đã bỏ Transparency = 1 (quái hiện rõ) & dùng logic tìm quái gốc.
+-- Đã bỏ phóng to mob (Size = 60) và gom mob về dưới chân player.
 -- ============================================================
 
 local Players           = game:GetService("Players")
@@ -25,8 +25,8 @@ _G.FarAttackRadius = 60
 _G.FarAttackDelay  = 0.05
 _G.WeaponType      = "Melee"
 _G.UseBypass       = true
-_G.MobHoverHeight  = 10
-_G.NPCHoverOffset  = 5
+_G.MobHoverHeight  = 3     -- Đã giảm độ cao hover xuống 3 studs
+_G.NPCHoverOffset  = 3
 _G.HoverSpeed      = 150
 _G.BringMobs       = true
 
@@ -42,7 +42,7 @@ local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
 local Window = Rayfield:CreateWindow({
    Name = "MANGO HUB 🥭",
-   LoadingTitle = "Mango Hub V5",
+   LoadingTitle = "Mango Hub V6",
    LoadingSubtitle = "by AI",
    ConfigurationSaving = { Enabled = false },
    KeySystem = false,
@@ -127,7 +127,7 @@ local function AutoHaki()
 end
 
 -- ============================================================
--- CHECK LEVEL (Đã rút gọn, dùng logic gốc)
+-- CHECK LEVEL (Rút gọn)
 -- ============================================================
 function CheckLevel()
     local lvl = LP.Data.Level.Value
@@ -406,7 +406,7 @@ local function fireHit(head, list)
 end
 
 -- ============================================================
--- ATTACK LOOP
+-- ATTACK LOOP (Đã sửa: Gom mob về dưới chân, giữ nguyên Size)
 -- ============================================================
 task.spawn(function()
     while task.wait(_G.FarAttackDelay) do
@@ -425,16 +425,16 @@ task.spawn(function()
         if #list == 0 then continue end
 
         if _G.BringMobs then
-            local anchor = list[1][2]
-            if anchor and anchor.Parent then
-                local anchorCF = anchor.CFrame
+            local hrp = char:FindFirstChild("HumanoidRootPart")
+            if hrp then
+                local playerPos = hrp.Position
                 for _, t in ipairs(list) do
                     pcall(function()
                         if t[2] and t[2].Parent then
-                            t[2].CFrame       = anchorCF
-                            t[2].Size         = Vector3.new(60, 60, 60)
-                            -- ĐÃ XÓA DÒNG TRANSPARENCY = 1 (Mob sẽ hiện rõ)
-                            t[2].CanCollide   = false
+                            -- Gom mob về dưới chân người chơi (-3 studs trục Y)
+                            t[2].CFrame = CFrame.new(playerPos.X, playerPos.Y - 3, playerPos.Z)
+                            -- KHÔNG SET SIZE NỮA ĐỂ GIỮ HÌNH DẠNG GỐC
+                            t[2].CanCollide = false
                             local h = t[1]:FindFirstChildOfClass("Humanoid")
                             if h then
                                 h.WalkSpeed = 0
@@ -455,7 +455,7 @@ task.spawn(function()
 end)
 
 -- ============================================================
--- FARM LOOP (Dùng logic gốc: Check Quest Visible -> Tìm Mob theo Mon)
+-- FARM LOOP (Bay tới mob)
 -- ============================================================
 task.spawn(function()
     while task.wait(0.1) do
@@ -479,7 +479,7 @@ task.spawn(function()
                 questVisible = LP.PlayerGui.Main.Quest.Visible
             end)
 
-            -- Nếu chưa có Quest -> Bay tới NPC
+            -- Chưa có Quest -> Bay tới NPC
             if not questVisible then
                 _targetCF = CFrameQ * CFrame.new(0, _G.NPCHoverOffset, 0)
                 if (hrp.Position - CFrameQ.Position).Magnitude <= 15 then
@@ -489,22 +489,21 @@ task.spawn(function()
                 return
             end
 
-            -- Đã có Quest -> Tìm quái theo tên (Đúng logic gốc)
+            -- Đã có Quest -> Tìm quái
             local targetMob = nil
             if game:GetService("Workspace"):FindFirstChild("Enemies") then
                 for _, v in pairs(game:GetService("Workspace").Enemies:GetChildren()) do
                     if v.Name == Mon and v:FindFirstChild("Humanoid") and v:FindFirstChild("HumanoidRootPart") and v.Humanoid.Health > 0 then
                         targetMob = v
-                        break -- Đánh con đầu tiên tìm thấy
+                        break
                     end
                 end
             end
 
             if targetMob then
-                -- Bay lên trên đầu quái
+                -- Bay thấp xuống sát đầu quái (hover = 3)
                 _targetCF = targetMob.HumanoidRootPart.CFrame * CFrame.new(0, _G.MobHoverHeight, 0)
             else
-                -- Không thấy quái -> Bay tới vị trí spawn
                 _targetCF = CFrameMon * CFrame.new(0, _G.MobHoverHeight, 0)
             end
         end)
@@ -512,7 +511,7 @@ task.spawn(function()
 end)
 
 -- ============================================================
--- MOVEMENT LOOP (Tween mượt)
+-- MOVEMENT LOOP (Tween)
 -- ============================================================
 task.spawn(function()
     while task.wait(0.05) do
@@ -528,12 +527,11 @@ task.spawn(function()
         if not hrp or not hum then continue end
 
         if _targetCF then
-            -- Nếu xa quá (> 3000), teleport 1 phát để tránh tween quá lâu
             if (hrp.Position - _targetCF.Position).Magnitude > 3000 then
                 hrp.CFrame = CFrame.new(hrp.Position + (_targetCF.Position - hrp.Position).Unit * 2000)
             end
 
-            if (hrp.Position - _targetCF.Position).Magnitude > 5 then
+            if (hrp.Position - _targetCF.Position).Magnitude > 3 then
                 if not _currentTween or _currentTween.PlaybackState ~= Enum.PlaybackState.Playing then
                     local dist = (hrp.Position - _targetCF.Position).Magnitude
                     local duration = math.max(dist / _G.HoverSpeed, 0.1)
@@ -543,7 +541,6 @@ task.spawn(function()
             else
                 if _currentTween then pcall(function() _currentTween:Cancel() end); _currentTween = nil end
                 hrp.CFrame = _targetCF
-                -- Chống rớt bằng BodyVelocity Y
                 local bv = hrp:FindFirstChild("MangoHover")
                 if not bv then
                     bv = Instance.new("BodyVelocity")
@@ -572,11 +569,11 @@ FarmTab:CreateToggle({
 })
 
 FarmTab:CreateSlider({
-   Name = "Hover Height",
-   Range = {5, 50},
+   Name = "Hover Height (Thấp hơn)",
+   Range = {1, 20},
    Increment = 1,
    Suffix = "studs",
-   CurrentValue = 10,
+   CurrentValue = 3,
    Flag = "MobHoverHeight",
    Callback = function(Value)
        _G.MobHoverHeight = Value
@@ -584,7 +581,7 @@ FarmTab:CreateSlider({
 })
 
 FarmTab:CreateToggle({
-   Name = "Bring Mobs",
+   Name = "Gom Quái (Dưới chân)",
    CurrentValue = true,
    Flag = "BringMobs",
    Callback = function(Value)
@@ -645,4 +642,4 @@ SettingsTab:CreateToggle({
 })
 
 Rayfield:LoadConfiguration()
-print("[MANGO HUB] 🥭 V5 Loaded. Mobs are VISIBLE, Quest logic fixed.")
+print("[MANGO HUB] 🥭 V6 Loaded. Mobs normal size, low hover.")
