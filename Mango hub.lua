@@ -1,13 +1,14 @@
 -- ============================================================
--- MANGO HUB 🥭 - Rayfield UI + Hover Farm (V8 - Faithful Teleport)
+-- MANGO HUB 🥭 - Rayfield UI + Hover Farm (V10 - Strict Quest Filter)
 -- Yêu cầu executor: cloneref, bit32, sethiddenproperty
--- Đã sửa: Dùng BKP (Teleport thẳng) thay vì Tween, ghim HRP mỗi frame.
+-- Đã sửa: Bộ lọc tên quái tuyệt đối theo Quest, không gom nhầm quái.
 -- ============================================================
 
 local Players           = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace         = game:GetService("Workspace")
 local RunService        = game:GetService("RunService")
+local TweenService      = game:GetService("TweenService")
 local VirtualUser       = game:GetService("VirtualUser")
 
 local LP = Players.LocalPlayer
@@ -24,13 +25,16 @@ _G.FarAttackRadius = 60
 _G.FarAttackDelay  = 0.05
 _G.WeaponType      = "Melee"
 _G.UseBypass       = true
-_G.MobHoverHeight  = 3     -- Hover thấp xuống sát đầu mob
+_G.MobHoverHeight  = 3
 _G.NPCHoverOffset  = 3
+_G.HoverSpeed      = 150
 _G.BringMobs       = true
 
 -- State
 local _targetCF = nil
 local _targetMob = nil
+local _isNearMob = false
+local _currentTween = nil
 local Mon, NameMon, NameQuest, QuestLv, CFrameQ, CFrameMon
 
 -- ============================================================
@@ -40,7 +44,7 @@ local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
 local Window = Rayfield:CreateWindow({
    Name = "MANGO HUB 🥭",
-   LoadingTitle = "Mango Hub V8",
+   LoadingTitle = "Mango Hub V10",
    LoadingSubtitle = "by AI",
    ConfigurationSaving = { Enabled = false },
    KeySystem = false,
@@ -124,21 +128,8 @@ local function AutoHaki()
     end
 end
 
--- Teleport gốc (BKP)
-local function BKP(cf)
-    local char = LP.Character
-    if not char then return end
-    local hrp = char:FindFirstChild("HumanoidRootPart")
-    if not hrp then return end
-    pcall(function()
-        hrp.CFrame = cf
-        task.wait()
-        hrp.CFrame = cf
-    end)
-end
-
 -- ============================================================
--- CHECK LEVEL (Rút gọn)
+-- CHECK LEVEL
 -- ============================================================
 function CheckLevel()
     local lvl = LP.Data.Level.Value
@@ -356,7 +347,7 @@ end
 -- ============================================================
 -- SCAN + FIRE
 -- ============================================================
-local function scanTargets(radius)
+local function scanTargets(radius, mobName)
     local char = LP.Character
     if not char then return {}, nil end
     local hrp = char:FindFirstChild("HumanoidRootPart")
@@ -373,13 +364,16 @@ local function scanTargets(radius)
                     local mhum = mob:FindFirstChild("Humanoid")
                     if mhrp and mhum and mhum.Health > 0
                        and (mhrp.Position - origin).Magnitude <= radius then
-                        for _, part in ipairs(mob:GetChildren()) do
-                            if part:IsA("BasePart") then
-                                table.insert(list, {mob, part})
+                        -- Bộ lọc tên quái: Nếu có truyền mobName, bắt buộc phải khớp
+                        if not mobName or mob.Name == mobName then
+                            for _, part in ipairs(mob:GetChildren()) do
+                                if part:IsA("BasePart") then
+                                    table.insert(list, {mob, part})
+                                end
                             end
-                        end
-                        if not firstHead then
-                            firstHead = mob:FindFirstChild("Head") or mhrp
+                            if not firstHead then
+                                firstHead = mob:FindFirstChild("Head") or mhrp
+                            end
                         end
                     end
                 end
@@ -417,7 +411,7 @@ local function fireHit(head, list)
 end
 
 -- ============================================================
--- ATTACK LOOP (Gom quái & Bắn Hit)
+-- ATTACK LOOP (Lọc tên quái chặt chẽ)
 -- ============================================================
 task.spawn(function()
     while task.wait(_G.FarAttackDelay) do
@@ -432,13 +426,16 @@ task.spawn(function()
         if w then equipWeapon(w) end
         AutoHaki()
 
-        local list, head = scanTargets(_G.FarAttackRadius)
+        -- Nếu đang farm, chỉ quét đúng tên quái của nhiệm vụ. Nếu không farm, quét tất cả.
+        local targetName = _G.AutoFarmLevel and Mon or nil
+        local list, head = scanTargets(_G.FarAttackRadius, targetName)
+        
+        -- Nếu không có quái nào đúng tên trong bán kính, bỏ qua
         if #list == 0 then continue end
 
-        if _G.BringMobs then
+        if _G.BringMobs and (_isNearMob or not _G.AutoFarmLevel) then
             local hrp = char:FindFirstChild("HumanoidRootPart")
             if hrp then
-                -- Gom quái về dưới chân người chơi (cách 3 studs)
                 local gatherPos = CFrame.new(hrp.Position.X, hrp.Position.Y - 3, hrp.Position.Z)
                 for _, t in ipairs(list) do
                     pcall(function()
@@ -465,13 +462,15 @@ task.spawn(function()
 end)
 
 -- ============================================================
--- FARM LOOP (Tìm mob, cập nhật _targetCF)
+-- FARM LOOP (Kiểm tra chéo Quest và tìm quái)
 -- ============================================================
 task.spawn(function()
     while task.wait(0.1) do
         if not _G.AutoFarmLevel then
             _targetCF = nil
             _targetMob = nil
+            _isNearMob = false
+            if _currentTween then pcall(function() _currentTween:Cancel() end); _currentTween = nil end
             continue
         end
 
@@ -486,13 +485,26 @@ task.spawn(function()
             if not Mon or not CFrameQ then return end
 
             local questVisible = false
+            local questTitle = ""
             pcall(function()
                 questVisible = LP.PlayerGui.Main.Quest.Visible
+                if questVisible then
+                    questTitle = LP.PlayerGui.Main.Quest.Container.QuestTitle.Title.Text
+                end
             end)
 
-            -- 1. Chưa có Quest -> Bay tới NPC nhận
+            -- Bắt buộc: Nếu có Quest nhưng SAI TÊN quái, tự động hủy
+            if questVisible and questTitle ~= "" and not string.find(questTitle, NameMon) then
+                ReplicatedStorage.Remotes.CommF_:InvokeServer("AbandonQuest")
+                _targetCF = nil
+                _targetMob = nil
+                return
+            end
+
+            -- Nếu chưa có Quest -> Bay tới NPC
             if not questVisible then
                 _targetMob = nil
+                _isNearMob = false
                 _targetCF = CFrameQ * CFrame.new(0, _G.NPCHoverOffset, 0)
                 if (hrp.Position - CFrameQ.Position).Magnitude <= 15 then
                     ReplicatedStorage.Remotes.CommF_:InvokeServer("StartQuest", NameQuest, QuestLv)
@@ -501,7 +513,7 @@ task.spawn(function()
                 return
             end
 
-            -- 2. Đã có Quest -> Tìm mob GẦN NHẤT
+            -- Tìm mob GẦN NHẤT có tên khớp với Quest
             local enemies = Workspace:FindFirstChild("Enemies")
             local nearestMob, nearestDist = nil, math.huge
             if enemies then
@@ -522,8 +534,15 @@ task.spawn(function()
             if nearestMob then
                 _targetMob = nearestMob
                 _targetCF = nearestMob.HumanoidRootPart.CFrame * CFrame.new(0, _G.MobHoverHeight, 0)
+                -- Đánh dấu đã tới gần để cho phép gom
+                if nearestDist < 15 then
+                    _isNearMob = true
+                else
+                    _isNearMob = false
+                end
             else
                 _targetMob = nil
+                _isNearMob = false
                 _targetCF = CFrameMon * CFrame.new(0, _G.MobHoverHeight, 0)
             end
         end)
@@ -531,26 +550,41 @@ task.spawn(function()
 end)
 
 -- ============================================================
--- MOVEMENT LOOP (Ghim vị trí bằng Heartbeat - Không rớt)
+-- MOVEMENT LOOP (Bay bằng Tween)
 -- ============================================================
-RunService.Heartbeat:Connect(function()
-    if not _G.AutoFarmLevel then return end
-    if not _targetCF then return end
-
-    local char = LP.Character
-    if not char then return end
-    local hrp = char:FindFirstChild("HumanoidRootPart")
-    if not hrp then return end
-
-    -- Teleport thẳng tới _targetCF (giống hệt logic BKP của script gốc)
-    -- Đồng thời triệt tiêu mọi lực vật lý kéo xuống
-    pcall(function()
-        if (hrp.Position - _targetCF.Position).Magnitude > 2 then
-            hrp.CFrame = _targetCF
+task.spawn(function()
+    while task.wait(0.05) do
+        if not _G.AutoFarmLevel then
+            if _currentTween then pcall(function() _currentTween:Cancel() end); _currentTween = nil end
+            continue
         end
-        hrp.AssemblyLinearVelocity = Vector3.zero
-        hrp.AssemblyAngularVelocity = Vector3.zero
-    end)
+
+        local char = LP.Character
+        if not char then continue end
+        local hrp = char:FindFirstChild("HumanoidRootPart")
+        local hum = char:FindFirstChild("Humanoid")
+        if not hrp or not hum then continue end
+
+        if _targetCF then
+            if (hrp.Position - _targetCF.Position).Magnitude > 3000 then
+                hrp.CFrame = CFrame.new(hrp.Position + (_targetCF.Position - hrp.Position).Unit * 2000)
+            end
+
+            if (hrp.Position - _targetCF.Position).Magnitude > 5 then
+                if not _currentTween or _currentTween.PlaybackState ~= Enum.PlaybackState.Playing then
+                    local dist = (hrp.Position - _targetCF.Position).Magnitude
+                    local duration = math.max(dist / _G.HoverSpeed, 0.1)
+                    _currentTween = TweenService:Create(hrp, TweenInfo.new(duration, Enum.EasingStyle.Linear), {CFrame = _targetCF})
+                    _currentTween:Play()
+                end
+            else
+                if _currentTween then pcall(function() _currentTween:Cancel() end); _currentTween = nil end
+                hrp.CFrame = _targetCF
+                hrp.AssemblyLinearVelocity = Vector3.zero
+                hrp.AssemblyAngularVelocity = Vector3.zero
+            end
+        end
+    end
 end)
 
 -- ============================================================
@@ -562,7 +596,7 @@ FarmTab:CreateToggle({
    Flag = "AutoFarmLevel",
    Callback = function(Value)
        _G.AutoFarmLevel = Value
-       if not Value then _targetCF = nil; _targetMob = nil end
+       if not Value then _targetCF = nil; _targetMob = nil; _isNearMob = false end
    end,
 })
 
@@ -579,7 +613,7 @@ FarmTab:CreateSlider({
 })
 
 FarmTab:CreateToggle({
-   Name = "Gom Quái (Dưới chân)",
+   Name = "Gom Quái (Khi tới gần)",
    CurrentValue = true,
    Flag = "BringMobs",
    Callback = function(Value)
@@ -640,4 +674,4 @@ SettingsTab:CreateToggle({
 })
 
 Rayfield:LoadConfiguration()
-print("[MANGO HUB] 🥭 V8 Loaded. Faithful Teleport Method applied.")
+print("[MANGO HUB] 🥭 V10 Loaded. Strict Quest Filter applied.")
