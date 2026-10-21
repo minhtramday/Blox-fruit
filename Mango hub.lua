@@ -1,51 +1,50 @@
 -- ============================================================
--- AUTO FARM LEVEL + FAR ATTACK (hợp nhất hdanhhub + redzhub)
+-- HOVER FARM LEVEL + AUTO FAR ATTACK
 -- Cơ chế:
---   1. CheckLevel() → xác định quest/mob theo level
---   2. Nhận quest tại NPC (Tween2 tới CFrameQuest)
---   3. Với mỗi mob: freeze mob tại FarmPos → teleport player 30 studs
---      trên đầu mob (ghim liên tục bằng Heartbeat) → FireServer
---      RegisterAttack(1e-9) + RegisterHit(hitList)
+--   - Player bay lơ lửng LIÊN TỤC (Heartbeat lerp + Zero Velocity)
+--     → không bao giờ chạm đất khi bật, chỉ rớt khi tắt
+--   - Hover ở độ cao cố định trên đầu từng mob trong quest
+--   - Tự động FireServer RegisterAttack(1e-9) + RegisterHit(hitList)
+--   - XOR bypass signature cho phiên bản mới
+--   - AUTO chạy ngay khi executor load (AutoFarAttack = true)
 -- Yêu cầu executor: cloneref, sethiddenproperty, bit32
 -- ============================================================
 
 local Players           = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace         = game:GetService("Workspace")
-local TweenService      = game:GetService("TweenService")
-local VirtualUser       = game:GetService("VirtualUser")
 local RunService        = game:GetService("RunService")
+local VirtualUser       = game:GetService("VirtualUser")
 
 local LP = Players.LocalPlayer
 
--- Module Net (chứa RE/RegisterAttack, RE/RegisterHit, seed)
 local Net       = ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Net")
 local RE_Attack = Net:WaitForChild("RE/RegisterAttack")
 local RE_Hit    = Net:WaitForChild("RE/RegisterHit")
 
 -- ============================================================
--- CẤU HÌNH
+-- CONFIG
 -- ============================================================
-_G.AutoFarmLevel   = false
+_G.AutoFarAttack   = true          -- tự bật khi load script
+_G.AutoFarmLevel   = false         -- bật qua GUI để farm
 _G.FarAttackRadius = 60
 _G.FarAttackDelay  = 0.05
 _G.WeaponType      = "Melee"
 _G.UseBypass       = true
-_G.TeleportAbove   = true
-_G.BringMobs       = true
-_G.KillPercent     = 100
+_G.HoverHeight     = 30            -- studs trên đầu mob
+_G.HoverLockY      = nil           -- Y cố định (init khi bật farm)
+_G.FlyLerp         = 0.18          -- tốc độ bay mượt (0.1 chậm, 0.5 nhanh)
+_G.BringMobs       = true          -- freeze mob để hit dễ trúng
 
--- Trạng thái
-local Pos     = CFrame.new(0, 30, 0)
-local FarmPos = nil
-local MonFarm = nil
-local Mon     = nil
-local NameMon, NameQuest, QuestLv
-local CFrameQ, CFrameMon
-local SelectWeapon = nil
+-- Hover state
+local _hoverCF = nil
+local _targetMob = nil
+
+-- Biến CheckLevel
+local Mon, NameMon, NameQuest, QuestLv, CFrameQ, CFrameMon
 
 -- ============================================================
--- QUÉT SIGNED REMOTE (bypass signature)
+-- SIGNED REMOTE BYPASS
 -- ============================================================
 local signedRemote, signedId
 for _, container in ipairs({
@@ -75,79 +74,32 @@ LP.Idled:Connect(function()
 end)
 
 -- ============================================================
--- TELEPORT (SafeMove)
--- ============================================================
-local STEP_SIZE = 60
-local STEP_WAIT = 0.5
-local _moveThread = nil
-
-local function SafeMove(targetCF, checkStop)
-    local char = LP.Character
-    if not char then return end
-    local hrp = char:FindFirstChild("HumanoidRootPart")
-    if not hrp then return end
-    local targetPos = targetCF.Position
-    while true do
-        if checkStop and checkStop() then break end
-        local cur = hrp.Position
-        local remaining = (targetPos - cur).Magnitude
-        if remaining < 8 then break end
-        local dir = (targetPos - cur).Unit
-        local step = math.min(remaining, STEP_SIZE)
-        local nextPos = cur + dir * step
-        local nextCF = remaining <= STEP_SIZE and targetCF or CFrame.new(nextPos)
-        pcall(function() hrp.CFrame = nextCF end)
-        task.wait(STEP_WAIT)
-    end
-end
-
-local function Tween2(targetCF)
-    if not targetCF then return end
-    if _moveThread then pcall(function() task.cancel(_moveThread) end) end
-    _moveThread = task.spawn(function()
-        SafeMove(targetCF, function() return _moveThread == nil end)
-        _moveThread = nil
-    end)
-end
-
-local function BKP(cf)
-    local char = LP.Character
-    if not char then return end
-    local hrp = char:FindFirstChild("HumanoidRootPart")
-    if not hrp then return end
-    hrp.CFrame = cf
-    task.wait()
-    hrp.CFrame = cf
-end
-
--- ============================================================
 -- WEAPON
 -- ============================================================
-local function getWeaponByType()
+local function getWeapon()
     local char = LP.Character
     if not char then return nil end
     local equipped = char:FindFirstChildOfClass("Tool")
     if equipped then
         local tip = equipped.ToolTip
-        if (_G.WeaponType == "Melee"      and tip == "Melee")
-        or (_G.WeaponType == "Sword"      and tip == "Sword")
+        if (_G.WeaponType == "Melee" and tip == "Melee")
+        or (_G.WeaponType == "Sword" and tip == "Sword")
         or (_G.WeaponType == "Blox Fruit" and tip == "Blox Fruit")
-        or (_G.WeaponType == "Gun"        and tip == "Gun") then
+        or (_G.WeaponType == "Gun" and tip == "Gun") then
             return equipped
         end
     end
     for _, t in ipairs(LP.Backpack:GetChildren()) do
         if t:IsA("Tool") then
             local tip = t.ToolTip
-            if (_G.WeaponType == "Melee"      and tip == "Melee")
-            or (_G.WeaponType == "Sword"      and tip == "Sword")
+            if (_G.WeaponType == "Melee" and tip == "Melee")
+            or (_G.WeaponType == "Sword" and tip == "Sword")
             or (_G.WeaponType == "Blox Fruit" and tip == "Blox Fruit")
-            or (_G.WeaponType == "Gun"        and tip == "Gun") then
+            or (_G.WeaponType == "Gun" and tip == "Gun") then
                 return t
             end
         end
     end
-    return nil
 end
 
 local function equipWeapon(t)
@@ -162,21 +114,18 @@ end
 local function AutoHaki()
     local char = LP.Character
     if char and not char:FindFirstChild("HasBuso") then
-        pcall(function()
-            ReplicatedStorage.Remotes.CommF_:InvokeServer("Buso")
-        end)
+        pcall(function() ReplicatedStorage.Remotes.CommF_:InvokeServer("Buso") end)
     end
 end
 
 -- ============================================================
--- CHECK LEVEL / QUEST
+-- CHECK LEVEL (rút gọn Sea 1-2-3)
 -- ============================================================
-local function CheckLevel()
+function CheckLevel()
     local lvl = LP.Data.Level.Value
     local place = game.PlaceId
 
     if place == 2753915549 or place == 85211729168715 then
-        -- SEA 1
         if lvl <= 9 then
             Mon="Bandit"; NameMon="Bandit"; NameQuest="BanditQuest1"; QuestLv=1
             CFrameQ=CFrame.new(1059.37,15.45,1550.42)
@@ -284,7 +233,6 @@ local function CheckLevel()
         end
 
     elseif place == 4442272183 or place == 79091703265657 then
-        -- SEA 2
         if lvl <= 724 then
             Mon="Raider"; NameMon="Raider"; NameQuest="Area1Quest"; QuestLv=1
             CFrameQ=CFrame.new(-429.54,71.77,1836.18)
@@ -376,7 +324,6 @@ local function CheckLevel()
         end
 
     else
-        -- SEA 3
         if lvl <= 1524 then
             Mon="Pirate Millionaire"; NameMon="Pirate Millionaire"; NameQuest="PiratePortQuest"; QuestLv=1
             CFrameQ=CFrame.new(-450.10,107.68,5950.73)
@@ -458,8 +405,36 @@ local function CheckLevel()
 end
 
 -- ============================================================
--- FIRE REMOTE
+-- SCAN + FIRE
 -- ============================================================
+local function scanTargets(radius)
+    local char = LP.Character
+    if not char then return {}, nil end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return {}, nil end
+    local origin, list, firstHead = hrp.Position, {}, nil
+    for _, containerName in ipairs({"Enemies", "Characters"}) do
+        local container = Workspace:FindFirstChild(containerName)
+        if container then
+            for _, mob in ipairs(container:GetChildren()) do
+                if mob ~= char then
+                    local mhrp = mob:FindFirstChild("HumanoidRootPart")
+                    local mhum = mob:FindFirstChild("Humanoid")
+                    if mhrp and mhum and mhum.Health > 0 then
+                        if (mhrp.Position - origin).Magnitude <= radius then
+                            table.insert(list, {mob, mhrp})
+                            if not firstHead then
+                                firstHead = mob:FindFirstChild("Head") or mhrp
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return list, firstHead
+end
+
 local function fireAttack()
     pcall(function() RE_Attack:FireServer(1e-9) end)
 end
@@ -484,42 +459,50 @@ local function fireHit(head, list)
 end
 
 -- ============================================================
--- SCAN
+-- HEARTBEAT HOVER — GHIM PLAYER LƠ LỬNG LIÊN TỤC
+-- Không bao giờ chạm đất khi bật, chỉ rớt khi tắt (hoverCF = nil)
 -- ============================================================
-local function scanTargets(radius, nameFilter)
-    local char = LP.Character
-    if not char then return {}, nil end
-    local hrp = char:FindFirstChild("HumanoidRootPart")
-    if not hrp then return {}, nil end
-    local origin, list, firstHead = hrp.Position, {}, nil
+RunService.Heartbeat:Connect(function()
+    if not _G.AutoFarmLevel then return end
 
-    local enemies = Workspace:FindFirstChild("Enemies")
-    if not enemies then return {}, nil end
-    for _, mob in ipairs(enemies:GetChildren()) do
-        if (not nameFilter or mob.Name == nameFilter) then
-            local mhrp = mob:FindFirstChild("HumanoidRootPart")
-            local mhum = mob:FindFirstChild("Humanoid")
-            if mhrp and mhum and mhum.Health > 0 then
-                if (mhrp.Position - origin).Magnitude <= radius then
-                    table.insert(list, {mob, mhrp})
-                    if not firstHead then
-                        firstHead = mob:FindFirstChild("Head") or mhrp
-                    end
-                end
+    local char = LP.Character
+    if not char then return end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+
+    local target = _hoverCF
+    if not target and _G.HoverLockY then
+        -- Không có mob → giữ nguyên Y cố định (không chạm đất)
+        target = CFrame.new(hrp.Position.X, _G.HoverLockY, hrp.Position.Z)
+    end
+    if not target then return end
+
+    pcall(function()
+        local dist = (target.Position - hrp.Position).Magnitude
+        if dist > 3 then
+            hrp.CFrame = hrp.CFrame:Lerp(target, _G.FlyLerp)
+        else
+            hrp.CFrame = target
+        end
+        hrp.AssemblyLinearVelocity  = Vector3.zero
+        hrp.AssemblyAngularVelocity = Vector3.zero
+        -- Chống rớt: kill mọi BodyVelocity/BodyPosition đang kéo xuống
+        for _, obj in ipairs(hrp:GetChildren()) do
+            if obj:IsA("BodyVelocity") or obj:IsA("BodyPosition") then
+                obj:Destroy()
             end
         end
-    end
-    return list, firstHead
-end
+    end)
+end)
 
 -- ============================================================
--- FARM LOOP (FIXED: freeze mob → teleport lơ lửng → ghim Heartbeat)
+-- FARM LOOP — BAY LƠ LỬNG ĐẾN TỪNG CON QUÁI
 -- ============================================================
 task.spawn(function()
     while task.wait(_G.FarAttackDelay) do
         if not _G.AutoFarmLevel then
-            FarmPos = nil
-            MonFarm = nil
+            _hoverCF = nil
+            _targetMob = nil
             continue
         end
 
@@ -533,9 +516,10 @@ task.spawn(function()
             CheckLevel()
             if not NameMon or not CFrameQ then return end
 
-            equipWeapon(getWeaponByType())
+            equipWeapon(getWeapon())
             AutoHaki()
 
+            -- Quest
             local questVisible = false
             local questTitle = ""
             pcall(function()
@@ -545,72 +529,76 @@ task.spawn(function()
                 end
             end)
 
+            -- Có quest khác → bỏ
             if questVisible and questTitle ~= "" and not string.find(questTitle, NameMon) then
-                MonFarm = nil
-                FarmPos = nil
+                _hoverCF = nil
                 ReplicatedStorage.Remotes.CommF_:InvokeServer("AbandonQuest")
                 return
             end
 
+            -- Chưa có quest → hover trên NPC + StartQuest khi đủ gần
             if not questVisible then
-                MonFarm = nil
-                FarmPos = nil
-                if (CFrameQ.Position - hrp.Position).Magnitude > 20 then
-                    Tween2(CFrameQ)
-                else
+                _hoverCF = CFrame.new(CFrameQ.X, CFrameQ.Y + _G.HoverHeight, CFrameQ.Z)
+                if (CFrameQ.Position - hrp.Position).Magnitude <= 15 then
                     ReplicatedStorage.Remotes.CommF_:InvokeServer("StartQuest", NameQuest, QuestLv)
                     task.wait(0.3)
                 end
                 return
             end
 
+            -- Có quest đúng → tìm mob trong nhiệm vụ
             if questVisible and string.find(questTitle, NameMon) then
-                local list, head = scanTargets(_G.FarAttackRadius, Mon)
-
-                if #list > 0 then
-                    local targetMob = list[1][1]
-                    local targetHrp = list[1][2]
-
-                    -- BƯỚC 1: Freeze mob tại FarmPos trước
-                    FarmPos = targetHrp.CFrame
-                    MonFarm = targetMob.Name
-                    pcall(function()
-                        sethiddenproperty(LP, "SimulationRadius", math.huge)
-                    end)
-
-                    if _G.BringMobs then
-                        for _, t in ipairs(list) do
-                            pcall(function()
-                                if t[2] and t[2].Parent then
-                                    t[2].CFrame       = FarmPos
-                                    t[2].Size         = Vector3.new(60, 60, 60)
-                                    t[2].Transparency = 1
-                                    t[2].CanCollide   = false
-                                    local h = t[1]:FindFirstChildOfClass("Humanoid")
-                                    if h then
-                                        h.WalkSpeed = 0
-                                        h.JumpPower = 0
-                                        local animator = h:FindFirstChild("Animator")
-                                        if animator then animator:Destroy() end
-                                    end
-                                end
-                            end)
+                local targetMob = nil
+                local enemies = Workspace:FindFirstChild("Enemies")
+                if enemies then
+                    for _, mob in ipairs(enemies:GetChildren()) do
+                        if mob.Name == Mon
+                        and mob:FindFirstChild("Humanoid")
+                        and mob:FindFirstChild("HumanoidRootPart")
+                        and mob.Humanoid.Health > 0 then
+                            targetMob = mob
+                            break
                         end
                     end
+                end
 
-                    -- BƯỚC 2: Teleport player lơ lửng 30 studs trên FarmPos
-                    if _G.TeleportAbove and FarmPos then
-                        BKP(FarmPos * Pos)
+                if targetMob then
+                    _targetMob = targetMob
+                    local mhrp = targetMob.HumanoidRootPart
+
+                    -- Hover 30 studs trên đầu mob (tự bay mượt đến bằng Heartbeat lerp)
+                    _hoverCF = mhrp.CFrame * CFrame.new(0, _G.HoverHeight, 0)
+
+                    -- Freeze mob (bring mob — chỉ khi đã đủ gần)
+                    local distToMob = (mhrp.Position - hrp.Position).Magnitude
+                    if _G.BringMobs and distToMob < _G.FarAttackRadius then
+                        pcall(function()
+                            sethiddenproperty(LP, "SimulationRadius", math.huge)
+                            mhrp.CanCollide = false
+                            mhrp.Size      = Vector3.new(60, 60, 60)
+                            mhrp.Transparency = 1
+                            local mh = targetMob:FindFirstChildOfClass("Humanoid")
+                            if mh then
+                                mh.WalkSpeed = 0
+                                mh.JumpPower = 0
+                                local animator = mh:FindFirstChild("Animator")
+                                if animator then animator:Destroy() end
+                            end
+                        end)
                     end
 
-                    -- BƯỚC 3: Bắn remote
-                    fireAttack()
-                    fireHit(head, list)
-
+                    -- Bắn hit khi đủ gần
+                    if distToMob < _G.FarAttackRadius then
+                        local list, head = scanTargets(_G.FarAttackRadius)
+                        if #list > 0 then
+                            fireAttack()
+                            fireHit(head, list)
+                        end
+                    end
                 else
-                    MonFarm = nil
-                    FarmPos = nil
-                    Tween2(CFrameMon)
+                    -- Không có mob → hover trên vị trí spawn quái
+                    _targetMob = nil
+                    _hoverCF = CFrame.new(CFrameMon.X, CFrameMon.Y + _G.HoverHeight, CFrameMon.Z)
                 end
             end
         end)
@@ -618,36 +606,62 @@ task.spawn(function()
 end)
 
 -- ============================================================
--- GHIM PLAYER LƠ LỬNG LIÊN TỤC
+-- AUTO FAR ATTACK (bật sẵn khi load — chỉ fire hit quanh player)
+-- Khi Farm OFF nhưng FarAttack ON → vẫn đánh mọi thứ trong bán kính
 -- ============================================================
-RunService.Heartbeat:Connect(function()
-    if not _G.AutoFarmLevel then return end
-    if not _G.TeleportAbove then return end
-    if not FarmPos then return end
+task.spawn(function()
+    while task.wait(_G.FarAttackDelay) do
+        if not _G.AutoFarAttack then continue end
+        if _G.AutoFarmLevel then continue end  -- farm loop đã tự fire, tránh double
 
-    local char = LP.Character
-    if not char then return end
-    local hrp = char:FindFirstChild("HumanoidRootPart")
-    if not hrp then return end
+        local char = LP.Character
+        if not char then continue end
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        local hrp = char:FindFirstChild("HumanoidRootPart")
+        if not hum or not hrp or hum.Health <= 0 then continue end
 
-    pcall(function()
-        hrp.CFrame = FarmPos * Pos
-        hrp.AssemblyLinearVelocity = Vector3.zero
-        hrp.AssemblyAngularVelocity = Vector3.zero
-    end)
+        local w = getWeapon()
+        if w then equipWeapon(w) end
+
+        local list, head = scanTargets(_G.FarAttackRadius)
+        if #list == 0 then continue end
+
+        if _G.BringMobs then
+            local anchor = list[1][2]
+            for _, t in ipairs(list) do
+                pcall(function()
+                    if t[2] and t[2].Parent then
+                        t[2].CFrame       = anchor.CFrame
+                        t[2].Size         = Vector3.new(60, 60, 60)
+                        t[2].CanCollide   = false
+                        local h = t[1]:FindFirstChildOfClass("Humanoid")
+                        if h then
+                            h.WalkSpeed = 0
+                            local animator = h:FindFirstChild("Animator")
+                            if animator then animator:Destroy() end
+                        end
+                    end
+                end)
+            end
+            pcall(function() sethiddenproperty(LP, "SimulationRadius", math.huge) end)
+        end
+
+        fireAttack()
+        fireHit(head, list)
+    end
 end)
 
 -- ============================================================
 -- GUI
 -- ============================================================
 local gui = Instance.new("ScreenGui")
-gui.Name = "AutoFarmFarAttack"
+gui.Name = "HoverFarmFarAttack"
 gui.ResetOnSpawn = false
 gui.Parent = LP:WaitForChild("PlayerGui")
 
 local frame = Instance.new("Frame")
-frame.Size             = UDim2.new(0, 260, 0, 320)
-frame.Position         = UDim2.new(0, 20, 0.5, -160)
+frame.Size             = UDim2.new(0, 270, 0, 340)
+frame.Position         = UDim2.new(0, 20, 0.5, -170)
 frame.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
 frame.BorderSizePixel  = 0
 frame.Active           = true
@@ -658,26 +672,58 @@ local title = Instance.new("TextLabel")
 title.Size             = UDim2.new(1, 0, 0, 32)
 title.BackgroundColor3 = Color3.fromRGB(60, 60, 70)
 title.BorderSizePixel  = 0
-title.Text             = "FARM LEVEL + FAR ATTACK"
+title.Text             = "HOVER FARM + FAR ATTACK"
 title.TextColor3       = Color3.fromRGB(255, 255, 255)
 title.Font             = Enum.Font.GothamBold
 title.TextSize         = 13
 title.Parent           = frame
 
-local toggleBtn = Instance.new("TextButton")
-toggleBtn.Size             = UDim2.new(1, -20, 0, 40)
-toggleBtn.Position         = UDim2.new(0, 10, 0, 42)
-toggleBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
-toggleBtn.BorderSizePixel  = 0
-toggleBtn.Text             = "BẬT FARM"
-toggleBtn.TextColor3       = Color3.fromRGB(255, 255, 255)
-toggleBtn.Font             = Enum.Font.GothamBold
-toggleBtn.TextSize         = 14
-toggleBtn.Parent           = frame
-toggleBtn.MouseButton1Click:Connect(function()
+-- Nút Farm Level
+local farmBtn = Instance.new("TextButton")
+farmBtn.Size             = UDim2.new(1, -20, 0, 40)
+farmBtn.Position         = UDim2.new(0, 10, 0, 42)
+farmBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+farmBtn.BorderSizePixel  = 0
+farmBtn.Text             = "BẬT FARM (BAY LƠ LỬNG)"
+farmBtn.TextColor3       = Color3.fromRGB(255, 255, 255)
+farmBtn.Font             = Enum.Font.GothamBold
+farmBtn.TextSize         = 12
+farmBtn.Parent           = frame
+farmBtn.MouseButton1Click:Connect(function()
     _G.AutoFarmLevel = not _G.AutoFarmLevel
-    toggleBtn.Text = _G.AutoFarmLevel and "TẮT FARM" or "BẬT FARM"
-    toggleBtn.BackgroundColor3 = _G.AutoFarmLevel
+    if _G.AutoFarmLevel then
+        local char = LP.Character
+        if char then
+            local hrp = char:FindFirstChild("HumanoidRootPart")
+            if hrp then
+                _G.HoverLockY = hrp.Position.Y + _G.HoverHeight
+            end
+        end
+        farmBtn.Text = "TẮT FARM (RỚT XUỐNG)"
+        farmBtn.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
+    else
+        _hoverCF = nil
+        _G.HoverLockY = nil
+        farmBtn.Text = "BẬT FARM (BAY LƠ LỬNG)"
+        farmBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+    end
+end)
+
+-- Nút Far Attack
+local farBtn = Instance.new("TextButton")
+farBtn.Size             = UDim2.new(1, -20, 0, 32)
+farBtn.Position         = UDim2.new(0, 10, 0, 88)
+farBtn.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
+farBtn.BorderSizePixel  = 0
+farBtn.Text             = "AUTO FAR ATTACK: BẬT"
+farBtn.TextColor3       = Color3.fromRGB(255, 255, 255)
+farBtn.Font             = Enum.Font.GothamBold
+farBtn.TextSize         = 12
+farBtn.Parent           = frame
+farBtn.MouseButton1Click:Connect(function()
+    _G.AutoFarAttack = not _G.AutoFarAttack
+    farBtn.Text = _G.AutoFarAttack and "AUTO FAR ATTACK: BẬT" or "AUTO FAR ATTACK: TẮT"
+    farBtn.BackgroundColor3 = _G.AutoFarAttack
         and Color3.fromRGB(50, 200, 50)
         or  Color3.fromRGB(200, 50, 50)
 end)
@@ -693,7 +739,6 @@ local function makeLabel(text, y)
     l.TextSize               = 11
     l.TextXAlignment         = Enum.TextXAlignment.Left
     l.Parent                 = frame
-    return l
 end
 
 local function makeBox(text, y)
@@ -710,22 +755,34 @@ local function makeBox(text, y)
     return b
 end
 
-makeLabel("Bán kính (studs):", 92)
-local radiusBox = makeBox("60", 112)
+makeLabel("Bán kính hit (studs):", 128)
+local radiusBox = makeBox("60", 148)
 radiusBox.FocusLost:Connect(function()
     local v = tonumber(radiusBox.Text)
     if v and v > 0 and v <= 500 then _G.FarAttackRadius = v end
 end)
 
-makeLabel("Delay (giây):", 142)
-local delayBox = makeBox("0.05", 162)
+makeLabel("Delay (giây):", 178)
+local delayBox = makeBox("0.05", 198)
 delayBox.FocusLost:Connect(function()
     local v = tonumber(delayBox.Text)
     if v and v >= 0.01 and v <= 5 then _G.FarAttackDelay = v end
 end)
 
-makeLabel("Vũ khí (Melee/Sword/Blox Fruit/Gun):", 192)
-local weaponBox = makeBox("Melee", 212)
+makeLabel("Độ cao hover (studs):", 228)
+local hoverBox = makeBox("30", 248)
+hoverBox.FocusLost:Connect(function()
+    local v = tonumber(hoverBox.Text)
+    if v and v >= 5 and v <= 200 then
+        _G.HoverHeight = v
+        if _G.HoverLockY then
+            _G.HoverLockY = (_G.HoverLockY or 0) - 0 + v
+        end
+    end
+end)
+
+makeLabel("Vũ khí (Melee/Sword/Blox Fruit/Gun):", 278)
+local weaponBox = makeBox("Melee", 298)
 weaponBox.FocusLost:Connect(function()
     local v = weaponBox.Text
     if v == "Melee" or v == "Sword" or v == "Blox Fruit" or v == "Gun" then
@@ -735,35 +792,27 @@ weaponBox.FocusLost:Connect(function()
     end
 end)
 
-makeLabel("Bypass signature (true/false):", 242)
-local bypassBox = makeBox("true", 262)
-bypassBox.FocusLost:Connect(function()
-    _G.UseBypass = (bypassBox.Text:lower() == "true")
-end)
-
 local statusLbl = Instance.new("TextLabel")
 statusLbl.Size                   = UDim2.new(1, -20, 0, 24)
-statusLbl.Position               = UDim2.new(0, 10, 0, 288)
+statusLbl.Position               = UDim2.new(0, 10, 0, 316)
 statusLbl.BackgroundTransparency = 1
 statusLbl.Text                   = "Sẵn sàng"
 statusLbl.TextColor3             = Color3.fromRGB(150, 255, 150)
 statusLbl.Font                   = Enum.Font.Gotham
-statusLbl.TextSize               = 11
+statusLbl.TextSize               = 10
 statusLbl.TextXAlignment         = Enum.TextXAlignment.Left
 statusLbl.Parent                 = frame
 
 task.spawn(function()
     while task.wait(0.5) do
         if _G.AutoFarmLevel then
-            local n = 0
-            pcall(function()
-                CheckLevel()
-                local list = scanTargets(_G.FarAttackRadius, Mon)
-                n = #list
-            end)
-            statusLbl.Text = "Farm: " .. tostring(Mon or "?")
-                .. " | Mục tiêu: " .. n
+            local mon = tostring(Mon or "?")
+            local tgt = _targetMob and _targetMob.Name or "không có"
+            statusLbl.Text = "Hover | Quest: " .. mon .. " | Target: " .. tgt
             statusLbl.TextColor3 = Color3.fromRGB(150, 255, 150)
+        elseif _G.AutoFarAttack then
+            statusLbl.Text = "Far Attack ON (đứng yên đánh)"
+            statusLbl.TextColor3 = Color3.fromRGB(150, 200, 255)
         else
             statusLbl.Text = "Sẵn sàng"
             statusLbl.TextColor3 = Color3.fromRGB(150, 150, 150)
@@ -771,4 +820,4 @@ task.spawn(function()
     end
 end)
 
-print("[FarmFarAttack] Loaded. GUI ở góc trái màn hình.")
+print("[HoverFarmFarAttack] Loaded — AutoFarAttack = BẬT mặc định")
