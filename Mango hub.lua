@@ -1,13 +1,14 @@
 -- ============================================================
--- MANGO HUB 🥭 - Rayfield UI + Hover Farm + Far Attack (v4)
+-- MANGO HUB 🥭 - Rayfield UI + Hover Farm (V5 - Faithful Logic)
 -- Yêu cầu executor: cloneref, bit32, sethiddenproperty
--- Đã fix lỗi không bay tới quái (PlatformStand + BodyPosition)
+-- Đã bỏ Transparency = 1 (quái hiện rõ) & dùng logic tìm quái gốc.
 -- ============================================================
 
 local Players           = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace         = game:GetService("Workspace")
 local RunService        = game:GetService("RunService")
+local TweenService      = game:GetService("TweenService")
 local VirtualUser       = game:GetService("VirtualUser")
 
 local LP = Players.LocalPlayer
@@ -26,14 +27,13 @@ _G.WeaponType      = "Melee"
 _G.UseBypass       = true
 _G.MobHoverHeight  = 10
 _G.NPCHoverOffset  = 5
-_G.HoverSpeed      = 100
+_G.HoverSpeed      = 150
 _G.BringMobs       = true
 
 -- State
-local _hoverCF = nil
-local _targetMob = nil
-local _bp, _bg = nil, nil
+local _targetCF = nil
 local Mon, NameMon, NameQuest, QuestLv, CFrameQ, CFrameMon
+local _currentTween = nil
 
 -- ============================================================
 -- RAYFIELD UI
@@ -42,7 +42,7 @@ local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
 local Window = Rayfield:CreateWindow({
    Name = "MANGO HUB 🥭",
-   LoadingTitle = "Mango Hub v4",
+   LoadingTitle = "Mango Hub V5",
    LoadingSubtitle = "by AI",
    ConfigurationSaving = { Enabled = false },
    KeySystem = false,
@@ -127,7 +127,7 @@ local function AutoHaki()
 end
 
 -- ============================================================
--- CHECK LEVEL
+-- CHECK LEVEL (Đã rút gọn, dùng logic gốc)
 -- ============================================================
 function CheckLevel()
     local lvl = LP.Data.Level.Value
@@ -433,7 +433,7 @@ task.spawn(function()
                         if t[2] and t[2].Parent then
                             t[2].CFrame       = anchorCF
                             t[2].Size         = Vector3.new(60, 60, 60)
-                            t[2].Transparency = 1
+                            -- ĐÃ XÓA DÒNG TRANSPARENCY = 1 (Mob sẽ hiện rõ)
                             t[2].CanCollide   = false
                             local h = t[1]:FindFirstChildOfClass("Humanoid")
                             if h then
@@ -455,13 +455,12 @@ task.spawn(function()
 end)
 
 -- ============================================================
--- FARM LOOP (BUG 1 & 2 FIXED)
+-- FARM LOOP (Dùng logic gốc: Check Quest Visible -> Tìm Mob theo Mon)
 -- ============================================================
 task.spawn(function()
     while task.wait(0.1) do
         if not _G.AutoFarmLevel then
-            _hoverCF = nil
-            _targetMob = nil
+            _targetCF = nil
             continue
         end
 
@@ -473,66 +472,52 @@ task.spawn(function()
 
         pcall(function()
             CheckLevel()
-            if not NameMon or not CFrameQ then return end
+            if not Mon or not CFrameQ then return end
 
             local questVisible = false
             pcall(function()
                 questVisible = LP.PlayerGui.Main.Quest.Visible
             end)
 
-            -- Bỏ qua string check, chỉ cần có quest là tìm mob
+            -- Nếu chưa có Quest -> Bay tới NPC
             if not questVisible then
-                -- Bay tới NPC nhận quest
-                _hoverCF = CFrame.new(CFrameQ.X, CFrameQ.Y + _G.NPCHoverOffset, CFrameQ.Z)
-                if (hrp.Position - CFrameQ.Position).Magnitude < 20 then
+                _targetCF = CFrameQ * CFrame.new(0, _G.NPCHoverOffset, 0)
+                if (hrp.Position - CFrameQ.Position).Magnitude <= 15 then
                     ReplicatedStorage.Remotes.CommF_:InvokeServer("StartQuest", NameQuest, QuestLv)
                     task.wait(0.5)
                 end
-            else
-                -- Có quest: tìm mob gần nhất
-                local enemies = Workspace:FindFirstChild("Enemies")
-                local nearestMob, nearestDist = nil, math.huge
-                if enemies then
-                    for _, mob in ipairs(enemies:GetChildren()) do
-                        if mob.Name == Mon
-                        and mob:FindFirstChild("Humanoid")
-                        and mob:FindFirstChild("HumanoidRootPart")
-                        and mob.Humanoid.Health > 0 then
-                            local d = (mob.HumanoidRootPart.Position - hrp.Position).Magnitude
-                            if d < nearestDist then
-                                nearestDist = d
-                                nearestMob  = mob
-                            end
-                        end
+                return
+            end
+
+            -- Đã có Quest -> Tìm quái theo tên (Đúng logic gốc)
+            local targetMob = nil
+            if game:GetService("Workspace"):FindFirstChild("Enemies") then
+                for _, v in pairs(game:GetService("Workspace").Enemies:GetChildren()) do
+                    if v.Name == Mon and v:FindFirstChild("Humanoid") and v:FindFirstChild("HumanoidRootPart") and v.Humanoid.Health > 0 then
+                        targetMob = v
+                        break -- Đánh con đầu tiên tìm thấy
                     end
                 end
+            end
 
-                if nearestMob then
-                    _targetMob = nearestMob
-                    _hoverCF = nearestMob.HumanoidRootPart.CFrame * CFrame.new(0, _G.MobHoverHeight, 0)
-                else
-                    _targetMob = nil
-                    _hoverCF = CFrame.new(CFrameMon.X, CFrameMon.Y + _G.MobHoverHeight, CFrameMon.Z)
-                end
+            if targetMob then
+                -- Bay lên trên đầu quái
+                _targetCF = targetMob.HumanoidRootPart.CFrame * CFrame.new(0, _G.MobHoverHeight, 0)
+            else
+                -- Không thấy quái -> Bay tới vị trí spawn
+                _targetCF = CFrameMon * CFrame.new(0, _G.MobHoverHeight, 0)
             end
         end)
     end
 end)
 
 -- ============================================================
--- MOVEMENT LOOP (BUG 1 FIXED: PlatformStand + BodyPosition)
--- Tắt hoàn toàn vật lý, ghim chặt vào _hoverCF
+-- MOVEMENT LOOP (Tween mượt)
 -- ============================================================
 task.spawn(function()
-    while task.wait() do
+    while task.wait(0.05) do
         if not _G.AutoFarmLevel then
-            if _bp then _bp:Destroy(); _bp = nil end
-            if _bg then _bg:Destroy(); _bg = nil end
-            if LP.Character and LP.Character:FindFirstChild("Humanoid") then
-                LP.Character.Humanoid.PlatformStand = false
-                LP.Character.Humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
-            end
-            task.wait(0.5)
+            if _currentTween then pcall(function() _currentTween:Cancel() end); _currentTween = nil end
             continue
         end
 
@@ -542,34 +527,33 @@ task.spawn(function()
         local hum = char:FindFirstChild("Humanoid")
         if not hrp or not hum then continue end
 
-        if not _bp then
-            _bp = Instance.new("BodyPosition")
-            _bp.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
-            _bp.P = 10000
-            _bp.D = 500
-            _bp.Parent = hrp
-            
-            _bg = Instance.new("BodyGyro")
-            _bg.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
-            _bg.P = 10000
-            _bg.D = 500
-            _bg.Parent = hrp
-            
-            hum.PlatformStand = true
-            hum:ChangeState(Enum.HumanoidStateType.Physics)
-        end
-
-        if _hoverCF then
-            local dist = (_hoverCF.Position - hrp.Position).Magnitude
-            -- Nếu xa quá (> 150), teleport gần lại để tránh BodyPosition kéo văng
-            if dist > 150 then
-                hrp.CFrame = CFrame.new(hrp.Position + (_hoverCF.Position - hrp.Position).Unit * 100)
+        if _targetCF then
+            -- Nếu xa quá (> 3000), teleport 1 phát để tránh tween quá lâu
+            if (hrp.Position - _targetCF.Position).Magnitude > 3000 then
+                hrp.CFrame = CFrame.new(hrp.Position + (_targetCF.Position - hrp.Position).Unit * 2000)
             end
-            _bp.Position = _hoverCF.Position
-            _bg.CFrame = _hoverCF
-        else
-            _bp.Position = hrp.Position
-            _bg.CFrame = hrp.CFrame
+
+            if (hrp.Position - _targetCF.Position).Magnitude > 5 then
+                if not _currentTween or _currentTween.PlaybackState ~= Enum.PlaybackState.Playing then
+                    local dist = (hrp.Position - _targetCF.Position).Magnitude
+                    local duration = math.max(dist / _G.HoverSpeed, 0.1)
+                    _currentTween = TweenService:Create(hrp, TweenInfo.new(duration, Enum.EasingStyle.Linear), {CFrame = _targetCF})
+                    _currentTween:Play()
+                end
+            else
+                if _currentTween then pcall(function() _currentTween:Cancel() end); _currentTween = nil end
+                hrp.CFrame = _targetCF
+                -- Chống rớt bằng BodyVelocity Y
+                local bv = hrp:FindFirstChild("MangoHover")
+                if not bv then
+                    bv = Instance.new("BodyVelocity")
+                    bv.Name = "MangoHover"
+                    bv.MaxForce = Vector3.new(0, 1e5, 0)
+                    bv.Velocity = Vector3.zero
+                    bv.Parent = hrp
+                end
+                bv.Velocity = Vector3.zero
+            end
         end
     end
 end)
@@ -583,10 +567,7 @@ FarmTab:CreateToggle({
    Flag = "AutoFarmLevel",
    Callback = function(Value)
        _G.AutoFarmLevel = Value
-       if not Value then
-           _hoverCF = nil
-           _targetMob = nil
-       end
+       if not Value then _targetCF = nil end
    end,
 })
 
@@ -664,4 +645,4 @@ SettingsTab:CreateToggle({
 })
 
 Rayfield:LoadConfiguration()
-print("[MANGO HUB] 🥭 Rayfield Loaded. PlatformStand fix applied.")
+print("[MANGO HUB] 🥭 V5 Loaded. Mobs are VISIBLE, Quest logic fixed.")
