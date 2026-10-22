@@ -1,5 +1,5 @@
 -- ============================================================
--- MANGO HUB 🥭 - V53 (Full File Config)
+-- MANGO HUB 🥭 - V54 (Smart Quest + Mob Filter)
 -- By Minh Hub
 -- Yêu cầu executor: cloneref, bit32, sethiddenproperty
 -- ============================================================
@@ -17,17 +17,17 @@ local RE_Hit    = Net:WaitForChild("RE/RegisterHit")
 local CommF     = ReplicatedStorage.Remotes.CommF_
 
 -- ============================================================
--- CẤU HÌNH Y HỆT FILE GỐC
+-- CẤU HÌNH CHUẨN
 -- ============================================================
 _G.TuDanhXa       = true
 _G.TuDongCayCap   = false
 _G.TuDongDanhBoss = false
 _G.ChonBoss       = "The Gorilla King"
-_G.BanKinhDanh    = 1000000000 -- 1 tỷ studs
-_G.TocDoDanh      = 1e-9       -- Tốc độ ánh sáng (0.000000001s)
+_G.BanKinhDanh    = 60
+_G.TocDoDanh      = 0.03
 _G.LoaiVuKhi      = "Melee"
 _G.DungBypass     = true
-_G.DoCaoLoLung    = 30         -- 30 studs
+_G.DoCaoLoLung    = 30
 _G.GomQuai        = true
 
 -- Biến trạng thái
@@ -298,7 +298,7 @@ local function fireHit(head, list)
 end
 
 -- ============================================================
--- VÒNG LẶP ĐÁNH (Tốc độ ánh sáng)
+-- VÒNG LẶP ĐÁNH (Lọc quái chuẩn)
 -- ============================================================
 task.spawn(function()
     while task.wait(_G.TocDoDanh) do
@@ -316,20 +316,20 @@ task.spawn(function()
         local list, head = scanTargets(_G.BanKinhDanh)
         if #list == 0 then continue end
 
-        -- Gom quái (CHỈ GOM QUÁI ĐÚNG TÊN NHIỆM VỤ)
+        -- Gom quái (Chỉ gom đúng tên nhiệm vụ)
         if _G.GomQuai then
             local hrp = char:FindFirstChild("HumanoidRootPart")
             if hrp then
                 local gatherPos = CFrame.new(hrp.Position.X, hrp.Position.Y - 3, hrp.Position.Z)
                 for _, t in ipairs(list) do
-                    -- Kiểm tra tên quái: Chỉ gom nếu đúng tên Mon (hoặc nếu đang đánh boss thì đúng tên boss)
+                    -- Kiểm tra tên quái có khớp không
                     local isTarget = false
                     if _G.TuDongCayCap and string.find(t[1].Name, Mon) then
                         isTarget = true
                     elseif _G.TuDongDanhBoss and string.find(t[1].Name, _G.ChonBoss) then
                         isTarget = true
                     elseif not _G.TuDongCayCap and not _G.TuDongDanhBoss then
-                        isTarget = true -- Nếu không farm, đánh tất cả
+                        isTarget = true
                     end
 
                     if isTarget then
@@ -358,7 +358,7 @@ task.spawn(function()
 end)
 
 -- ============================================================
--- VÒNG LẶP CÀY CẤP / BOSS
+-- VÒNG LẶP CÀY CẤP / BOSS (Quest Lock + Abandon)
 -- ============================================================
 task.spawn(function()
     while task.wait(0.1) do
@@ -429,23 +429,34 @@ task.spawn(function()
                 CheckLevel()
                 if not Mon then return end
 
+                -- Lấy thông tin Quest hiện tại
                 local questVisible = false
+                local questText = ""
                 pcall(function()
                     questVisible = LP.PlayerGui.Main.Quest.Visible
+                    if questVisible then
+                        questText = LP.PlayerGui.Main.Quest.Container.QuestTitle.Title.Text
+                    end
                 end)
 
-                -- CHỈ gửi StartQuest 1 lần nếu chưa có
-                if not questVisible and not _questSent then
-                    _questSent = true
-                    CommF:InvokeServer("StartQuest", NameQuest, QuestLv)
-                    task.delay(2, function() _questSent = false end)
-                end
-
+                -- LOGIC QUEST LOCK
                 if questVisible then
-                    _questSent = false
+                    -- Đã có Quest. Kiểm tra tên có khớp không
+                    if questText ~= "" and not string.find(questText, NameMon) then
+                        -- Quest sai tên -> Hủy
+                        CommF:InvokeServer("AbandonQuest")
+                        _questSent = false
+                    end
+                else
+                    -- Chưa có Quest -> Gửi StartQuest (có cooldown)
+                    if not _questSent then
+                        _questSent = true
+                        CommF:InvokeServer("StartQuest", NameQuest, QuestLv)
+                        task.delay(2, function() _questSent = false end)
+                    end
                 end
 
-                -- Tìm quái
+                -- Tìm quái trong Workspace
                 local enemies = Workspace:FindFirstChild("Enemies")
                 local targetMob = nil
                 if enemies then
@@ -540,10 +551,10 @@ TabCaiDat:CreateSlider({
 
 TabCaiDat:CreateSlider({
    Name = "Tốc Độ Đánh",
-   Range = {0.000000001, 1},
-   Increment = 0.000000001,
+   Range = {0.01, 0.5},
+   Increment = 0.01,
    Suffix = "s",
-   CurrentValue = 0.000000001,
+   CurrentValue = 0.03,
    Flag = "TocDoDanh",
    Callback = function(Value) _G.TocDoDanh = Value end,
 })
@@ -564,4 +575,4 @@ TabCaiDat:CreateToggle({
 })
 
 Rayfield:LoadConfiguration()
-print("[MANGO HUB] 🥭 Loaded. By Minh Hub. Exact File Config.")
+print("[MANGO HUB] 🥭 Loaded. By Minh Hub.")
