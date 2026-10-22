@@ -1,5 +1,5 @@
 -- ============================================================
--- MANGO HUB 🥭 - V51 (Server-Side Quest Progress Fix + Bring Mobs)
+-- MANGO HUB 🥭 - V53 (Full File Config)
 -- By Minh Hub
 -- Yêu cầu executor: cloneref, bit32, sethiddenproperty
 -- ============================================================
@@ -17,23 +17,22 @@ local RE_Hit    = Net:WaitForChild("RE/RegisterHit")
 local CommF     = ReplicatedStorage.Remotes.CommF_
 
 -- ============================================================
--- CẤU HÌNH
+-- CẤU HÌNH Y HỆT FILE GỐC
 -- ============================================================
 _G.TuDanhXa       = true
 _G.TuDongCayCap   = false
 _G.TuDongDanhBoss = false
 _G.ChonBoss       = "The Gorilla King"
-_G.BanKinhDanh    = 60
-_G.TocDoDanh      = 0.05
+_G.BanKinhDanh    = 1000000000 -- 1 tỷ studs
+_G.TocDoDanh      = 1e-9       -- Tốc độ ánh sáng (0.000000001s)
 _G.LoaiVuKhi      = "Melee"
 _G.DungBypass     = true
-_G.DoCaoLoLung    = 5
-_G.GomQuai        = true    -- Bật mặc định để đánh nhanh
-_G.KhoangCachGom  = 100
+_G.DoCaoLoLung    = 30         -- 30 studs
+_G.GomQuai        = true
 
 -- Biến trạng thái
 local _lastQuestTime = 0
-local _questSent = false      -- Cờ chặn gửi StartQuest liên tục
+local _questSent = false
 local Mon, NameMon, NameQuest, QuestLv
 local _farmPos = nil
 
@@ -149,7 +148,6 @@ local function AutoHaki()
     end
 end
 
--- BKP: Teleport tức thời
 local function BKP(cf)
     local char = LP.Character
     if not char then return end
@@ -300,7 +298,7 @@ local function fireHit(head, list)
 end
 
 -- ============================================================
--- VÒNG LẶP ĐÁNH
+-- VÒNG LẶP ĐÁNH (Tốc độ ánh sáng)
 -- ============================================================
 task.spawn(function()
     while task.wait(_G.TocDoDanh) do
@@ -318,25 +316,37 @@ task.spawn(function()
         local list, head = scanTargets(_G.BanKinhDanh)
         if #list == 0 then continue end
 
-        -- Gom quái (Bring Mobs)
+        -- Gom quái (CHỈ GOM QUÁI ĐÚNG TÊN NHIỆM VỤ)
         if _G.GomQuai then
             local hrp = char:FindFirstChild("HumanoidRootPart")
             if hrp then
                 local gatherPos = CFrame.new(hrp.Position.X, hrp.Position.Y - 3, hrp.Position.Z)
                 for _, t in ipairs(list) do
-                    pcall(function()
-                        if t[2] and t[2].Parent then
-                            t[2].CFrame = gatherPos
-                            t[2].CanCollide = false
-                            local h = t[1]:FindFirstChildOfClass("Humanoid")
-                            if h then
-                                h.WalkSpeed = 0
-                                h.JumpPower = 0
-                                local anim = h:FindFirstChild("Animator")
-                                if anim then anim:Destroy() end
+                    -- Kiểm tra tên quái: Chỉ gom nếu đúng tên Mon (hoặc nếu đang đánh boss thì đúng tên boss)
+                    local isTarget = false
+                    if _G.TuDongCayCap and string.find(t[1].Name, Mon) then
+                        isTarget = true
+                    elseif _G.TuDongDanhBoss and string.find(t[1].Name, _G.ChonBoss) then
+                        isTarget = true
+                    elseif not _G.TuDongCayCap and not _G.TuDongDanhBoss then
+                        isTarget = true -- Nếu không farm, đánh tất cả
+                    end
+
+                    if isTarget then
+                        pcall(function()
+                            if t[2] and t[2].Parent then
+                                t[2].CFrame = gatherPos
+                                t[2].CanCollide = false
+                                local h = t[1]:FindFirstChildOfClass("Humanoid")
+                                if h then
+                                    h.WalkSpeed = 0
+                                    h.JumpPower = 0
+                                    local anim = h:FindFirstChild("Animator")
+                                    if anim then anim:Destroy() end
+                                end
                             end
-                        end
-                    end)
+                        end)
+                    end
                 end
                 pcall(function() sethiddenproperty(LP, "SimulationRadius", math.huge) end)
             end
@@ -348,12 +358,11 @@ task.spawn(function()
 end)
 
 -- ============================================================
--- VÒNG LẶP CÀY CẤP / BOSS (Fix Quest Progress)
+-- VÒNG LẶP CÀY CẤP / BOSS
 -- ============================================================
 task.spawn(function()
     while task.wait(0.1) do
         if not (_G.TuDongCayCap or _G.TuDongDanhBoss) then
-            -- Tắt BodyClip khi không farm
             local char = LP.Character
             if char then
                 local hrp = char:FindFirstChild("HumanoidRootPart")
@@ -372,7 +381,7 @@ task.spawn(function()
         if not hum or not hrp or hum.Health <= 0 then continue end
 
         pcall(function()
-            -- Bật BodyClip (Chống Snapback)
+            -- Bật BodyClip
             if not hrp:FindFirstChild("BodyClip") then
                 local bv = Instance.new("BodyVelocity")
                 bv.Name = "BodyClip"
@@ -420,25 +429,23 @@ task.spawn(function()
                 CheckLevel()
                 if not Mon then return end
 
-                -- Kiểm tra Quest hiện tại
                 local questVisible = false
                 pcall(function()
                     questVisible = LP.PlayerGui.Main.Quest.Visible
                 end)
 
-                -- CHỈ gửi StartQuest 1 LẦN nếu chưa có Quest
+                -- CHỈ gửi StartQuest 1 lần nếu chưa có
                 if not questVisible and not _questSent then
                     _questSent = true
                     CommF:InvokeServer("StartQuest", NameQuest, QuestLv)
                     task.delay(2, function() _questSent = false end)
                 end
 
-                -- Nếu đã có Quest thì KHÔNG gửi StartQuest nữa (tránh reset progress)
                 if questVisible then
                     _questSent = false
                 end
 
-                -- Tìm quái trong Workspace
+                -- Tìm quái
                 local enemies = Workspace:FindFirstChild("Enemies")
                 local targetMob = nil
                 if enemies then
@@ -454,12 +461,10 @@ task.spawn(function()
                 end
 
                 if targetMob then
-                    -- Nếu quái ở xa (ngoài bán kính 15), BKP tới gần
                     local dist = (targetMob.HumanoidRootPart.Position - hrp.Position).Magnitude
                     if dist > 15 then
                         BKP(CFrame.new(targetMob.HumanoidRootPart.Position.X, targetMob.HumanoidRootPart.Position.Y + _G.DoCaoLoLung, targetMob.HumanoidRootPart.Position.Z))
                     end
-                    -- Nếu đã ở gần, đứng yên đánh (GomQuai sẽ kéo quái về)
                     _farmPos = targetMob.HumanoidRootPart.CFrame
                 end
             end
@@ -483,10 +488,10 @@ TabCayCap:CreateToggle({
 
 TabCayCap:CreateSlider({
    Name = "Độ Cao Lơ Lửng",
-   Range = {3, 20},
+   Range = {3, 50},
    Increment = 1,
    Suffix = "studs",
-   CurrentValue = 5,
+   CurrentValue = 30,
    Flag = "DoCaoLoLung",
    Callback = function(Value) _G.DoCaoLoLung = Value end,
 })
@@ -535,10 +540,10 @@ TabCaiDat:CreateSlider({
 
 TabCaiDat:CreateSlider({
    Name = "Tốc Độ Đánh",
-   Range = {0.01, 1},
-   Increment = 0.01,
+   Range = {0.000000001, 1},
+   Increment = 0.000000001,
    Suffix = "s",
-   CurrentValue = 0.05,
+   CurrentValue = 0.000000001,
    Flag = "TocDoDanh",
    Callback = function(Value) _G.TocDoDanh = Value end,
 })
@@ -559,4 +564,4 @@ TabCaiDat:CreateToggle({
 })
 
 Rayfield:LoadConfiguration()
-print("[MANGO HUB] 🥭 Loaded. By Minh Hub.")
+print("[MANGO HUB] 🥭 Loaded. By Minh Hub. Exact File Config.")
