@@ -1,5 +1,5 @@
 -- ============================================================
--- MANGO HUB 🥭 - V33 (Full Code Integration - No PingPong)
+-- MANGO HUB 🥭 - V34 (Attack Always On + Fix Farm Teleport)
 -- Yêu cầu executor: cloneref, bit32, sethiddenproperty
 -- ============================================================
 
@@ -62,7 +62,7 @@ local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
 local Window = Rayfield:CreateWindow({
    Name = "MANGO HUB 🥭",
-   LoadingTitle = "Mango Hub V33",
+   LoadingTitle = "Mango Hub V34",
    LoadingSubtitle = "by AI",
    ConfigurationSaving = { Enabled = false },
    KeySystem = false,
@@ -147,7 +147,7 @@ local function AutoHaki()
     end
 end
 
--- BKP: TELEPORT TỨC THỜI (Lấy từ hdanhhub)
+-- BKP: TELEPORT TỨC THỜI
 local function BKP(cf)
     local char = LP.Character
     if not char then return end
@@ -274,7 +274,7 @@ end
 -- ============================================================
 -- SCAN + FIRE
 -- ============================================================
-local function scanTargets(radius, targetName)
+local function scanTargets(radius)
     local char = LP.Character
     if not char then return {}, nil end
     local hrp = char:FindFirstChild("HumanoidRootPart")
@@ -289,14 +289,12 @@ local function scanTargets(radius, targetName)
                 local mhrp = mob:FindFirstChild("HumanoidRootPart")
                 local mhum = mob:FindFirstChild("Humanoid")
                 if mhrp and mhum and mhum.Health > 0 and (mhrp.Position - origin).Magnitude <= radius then
-                    if not targetName or string.find(mob.Name, targetName) then
-                        for _, part in ipairs(mob:GetChildren()) do
-                            if part:IsA("BasePart") then
-                                table.insert(list, {mob, part})
-                            end
+                    for _, part in ipairs(mob:GetChildren()) do
+                        if part:IsA("BasePart") then
+                            table.insert(list, {mob, part})
                         end
-                        if not firstHead then firstHead = mob:FindFirstChild("Head") or mhrp end
                     end
+                    if not firstHead then firstHead = mob:FindFirstChild("Head") or mhrp end
                 end
             end
         end
@@ -332,7 +330,7 @@ local function fireHit(head, list)
 end
 
 -- ============================================================
--- ATTACK LOOP
+-- ATTACK LOOP (LUÔN BẬT - ĐÁNH MỌI THỨ)
 -- ============================================================
 task.spawn(function()
     while task.wait(_G.FarAttackDelay) do
@@ -347,14 +345,8 @@ task.spawn(function()
         if w then equipWeapon(w) end
         AutoHaki()
 
-        local targetName = nil
-        if _G.AutoFarmBoss then
-            targetName = _G.SelectBoss
-        elseif _G.AutoFarmLevel then
-            targetName = Mon
-        end
-
-        local list, head = scanTargets(_G.FarAttackRadius, targetName)
+        -- Quét TẤT CẢ quái trong bán kính 60 studs
+        local list, head = scanTargets(_G.FarAttackRadius)
         if #list == 0 then continue end
 
         if _G.BringMobs then
@@ -386,10 +378,10 @@ task.spawn(function()
 end)
 
 -- ============================================================
--- FARM LOOP (Full Code Integration)
+-- FARM LOOP (Delay 0.5s, Không Ping-pong)
 -- ============================================================
 task.spawn(function()
-    while task.wait(0.1) do
+    while task.wait(0.5) do -- Delay 0.5s chống spam
         if not (_G.AutoFarmLevel or _G.AutoFarmBoss) then
             _isStartingQuest = false
             _questActive = false
@@ -420,14 +412,14 @@ task.spawn(function()
 
                 if targetBoss then
                     local dist = (hrp.Position - targetBoss.HumanoidRootPart.Position).Magnitude
-                    if dist > 10 then
+                    if dist > 15 then
                         BKP(CFrame.new(targetBoss.HumanoidRootPart.Position.X, targetBoss.HumanoidRootPart.Position.Y + _G.MobHoverHeight, targetBoss.HumanoidRootPart.Position.Z))
                     end
                 else
                     local spawnCF = BossData[bossName]
                     if spawnCF then
                         local dist = (hrp.Position - spawnCF.Position).Magnitude
-                        if dist > 10 then
+                        if dist > 15 then
                             BKP(CFrame.new(spawnCF.X, spawnCF.Y + _G.MobHoverHeight, spawnCF.Z))
                         end
                     end
@@ -461,13 +453,13 @@ task.spawn(function()
                 if not questVisible then
                     local distToNPC = (hrp.Position - CFrameQ.Position).Magnitude
                     
-                    -- Chỉ BKP nếu ở xa NPC, còn ở gần thì đứng im
-                    if distToNPC > 15 then
+                    -- Chỉ BKP nếu ở xa NPC
+                    if distToNPC > 20 then
                         BKP(CFrameQ * CFrame.new(0, _G.NPCHoverOffset, 0))
                     end
                     
                     local xzDist = (Vector2.new(hrp.Position.X, hrp.Position.Z) - Vector2.new(CFrameQ.X, CFrameQ.Z)).Magnitude
-                    if xzDist < 15 and not _isStartingQuest then
+                    if xzDist < 20 and not _isStartingQuest then
                         _isStartingQuest = true
                         _questActive = true
                         _questGraceTime = tick()
@@ -496,12 +488,12 @@ task.spawn(function()
                 end
 
                 if targetMob then
-                    -- Nếu khoảng cách tới quái > 10 studs mới BKP
-                    if nearestDist > 10 then
+                    -- Nếu khoảng cách tới quái > 20 studs mới BKP
+                    if nearestDist > 20 then
                         BKP(CFrame.new(targetMob.HumanoidRootPart.Position.X, targetMob.HumanoidRootPart.Position.Y + _G.MobHoverHeight, targetMob.HumanoidRootPart.Position.Z))
                     end
                 else
-                    -- Không có quái -> Đứng im tại chỗ chờ (Không BKP đi đâu cả)
+                    -- Không có quái -> Đứng im tại chỗ chờ
                 end
             end
         end)
@@ -630,4 +622,4 @@ SettingsTab:CreateToggle({
 })
 
 Rayfield:LoadConfiguration()
-print("[MANGO HUB] 🥭 V33 Loaded. Full Code Integration.")
+print("[MANGO HUB] 🥭 V34 Loaded. Attack Always On + Fix Farm Teleport.")
