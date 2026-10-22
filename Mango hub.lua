@@ -1,5 +1,5 @@
 -- ============================================================
--- MANGO HUB 🥭 - V54 (Smart Quest + Mob Filter)
+-- MANGO HUB 🥭 - V55 (True 1B Radius + No Abandon)
 -- By Minh Hub
 -- Yêu cầu executor: cloneref, bit32, sethiddenproperty
 -- ============================================================
@@ -23,8 +23,8 @@ _G.TuDanhXa       = true
 _G.TuDongCayCap   = false
 _G.TuDongDanhBoss = false
 _G.ChonBoss       = "The Gorilla King"
-_G.BanKinhDanh    = 60
-_G.TocDoDanh      = 0.03
+_G.BanKinhDanh    = 1000000000 -- 1 tỷ studs
+_G.TocDoDanh      = 1e-9       -- Tốc độ ánh sáng
 _G.LoaiVuKhi      = "Melee"
 _G.DungBypass     = true
 _G.DoCaoLoLung    = 30
@@ -240,7 +240,7 @@ function CheckLevel()
 end
 
 -- ============================================================
--- QUÉT & BẮN HIT
+-- QUÉT & BẮN HIT (Bán kính 1 tỷ)
 -- ============================================================
 local function scanTargets(radius)
     local char = LP.Character
@@ -256,7 +256,8 @@ local function scanTargets(radius)
             if mob ~= char then
                 local mhrp = mob:FindFirstChild("HumanoidRootPart")
                 local mhum = mob:FindFirstChild("Humanoid")
-                if mhrp and mhum and mhum.Health > 0 and (mhrp.Position - origin).Magnitude <= radius then
+                -- Bán kính 1 tỷ studs (quét toàn bộ Workspace.Enemies)
+                if mhrp and mhum and mhum.Health > 0 and (mhrp.Position - origin).Magnitude <= 1000000000 then
                     for _, part in ipairs(mob:GetChildren()) do
                         if part:IsA("BasePart") then
                             table.insert(list, {mob, part})
@@ -298,10 +299,10 @@ local function fireHit(head, list)
 end
 
 -- ============================================================
--- VÒNG LẶP ĐÁNH (Lọc quái chuẩn)
+-- VÒNG LẶP ĐÁNH (Tốc độ 1e-9)
 -- ============================================================
 task.spawn(function()
-    while task.wait(_G.TocDoDanh) do
+    while task.wait(1e-9) do
         if not _G.TuDanhXa and not _G.TuDongCayCap and not _G.TuDongDanhBoss then continue end
 
         local char = LP.Character
@@ -313,7 +314,7 @@ task.spawn(function()
         if w then equipWeapon(w) end
         AutoHaki()
 
-        local list, head = scanTargets(_G.BanKinhDanh)
+        local list, head = scanTargets(1000000000)
         if #list == 0 then continue end
 
         -- Gom quái (Chỉ gom đúng tên nhiệm vụ)
@@ -322,7 +323,6 @@ task.spawn(function()
             if hrp then
                 local gatherPos = CFrame.new(hrp.Position.X, hrp.Position.Y - 3, hrp.Position.Z)
                 for _, t in ipairs(list) do
-                    -- Kiểm tra tên quái có khớp không
                     local isTarget = false
                     if _G.TuDongCayCap and string.find(t[1].Name, Mon) then
                         isTarget = true
@@ -358,7 +358,7 @@ task.spawn(function()
 end)
 
 -- ============================================================
--- VÒNG LẶP CÀY CẤP / BOSS (Quest Lock + Abandon)
+-- VÒNG LẶP CÀY CẤP / BOSS
 -- ============================================================
 task.spawn(function()
     while task.wait(0.1) do
@@ -429,34 +429,19 @@ task.spawn(function()
                 CheckLevel()
                 if not Mon then return end
 
-                -- Lấy thông tin Quest hiện tại
                 local questVisible = false
-                local questText = ""
                 pcall(function()
                     questVisible = LP.PlayerGui.Main.Quest.Visible
-                    if questVisible then
-                        questText = LP.PlayerGui.Main.Quest.Container.QuestTitle.Title.Text
-                    end
                 end)
 
-                -- LOGIC QUEST LOCK
-                if questVisible then
-                    -- Đã có Quest. Kiểm tra tên có khớp không
-                    if questText ~= "" and not string.find(questText, NameMon) then
-                        -- Quest sai tên -> Hủy
-                        CommF:InvokeServer("AbandonQuest")
-                        _questSent = false
-                    end
-                else
-                    -- Chưa có Quest -> Gửi StartQuest (có cooldown)
-                    if not _questSent then
-                        _questSent = true
-                        CommF:InvokeServer("StartQuest", NameQuest, QuestLv)
-                        task.delay(2, function() _questSent = false end)
-                    end
+                -- CHỈ gửi StartQuest nếu CHƯA CÓ Quest
+                if not questVisible and not _questSent then
+                    _questSent = true
+                    CommF:InvokeServer("StartQuest", NameQuest, QuestLv)
+                    task.delay(2, function() _questSent = false end)
                 end
 
-                -- Tìm quái trong Workspace
+                -- Tìm quái
                 local enemies = Workspace:FindFirstChild("Enemies")
                 local targetMob = nil
                 if enemies then
@@ -540,21 +525,11 @@ TabCaiDat:CreateToggle({
 })
 
 TabCaiDat:CreateSlider({
-   Name = "Bán Kính Đánh",
-   Range = {20, 200},
-   Increment = 5,
-   Suffix = "studs",
-   CurrentValue = 60,
-   Flag = "BanKinhDanh",
-   Callback = function(Value) _G.BanKinhDanh = Value end,
-})
-
-TabCaiDat:CreateSlider({
    Name = "Tốc Độ Đánh",
-   Range = {0.01, 0.5},
-   Increment = 0.01,
+   Range = {0.000000001, 1},
+   Increment = 0.000000001,
    Suffix = "s",
-   CurrentValue = 0.03,
+   CurrentValue = 0.000000001,
    Flag = "TocDoDanh",
    Callback = function(Value) _G.TocDoDanh = Value end,
 })
@@ -575,4 +550,4 @@ TabCaiDat:CreateToggle({
 })
 
 Rayfield:LoadConfiguration()
-print("[MANGO HUB] 🥭 Loaded. By Minh Hub.")
+print("[MANGO HUB] 🥭 Loaded. By Minh Hub. V55.")
