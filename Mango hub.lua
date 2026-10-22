@@ -1,5 +1,5 @@
 -- ============================================================
--- MANGO HUB 🥭 - V43 (Exact NPC + Safe Fly)
+-- MANGO HUB 🥭 - V44 (Quest Lock - Không bay về NPC khi có Quest)
 -- By Minh Hub
 -- Yêu cầu executor: cloneref, bit32, sethiddenproperty
 -- ============================================================
@@ -33,6 +33,8 @@ _G.FlySpeed        = 120
 _G.BringMobs       = false
 
 -- State
+local _hasQuest = false          -- Khóa Quest: Đã có quest thì không bay về NPC
+local _questMissingTime = 0      -- Thời điểm bắt đầu mất Quest
 local _lastQuestTime = 0
 local _currentTween = nil
 local Mon, NameMon, NameQuest, QuestLv, CFrameQ, CFrameMon
@@ -149,7 +151,7 @@ local function AutoHaki()
     end
 end
 
--- BKP: Teleport tức thời (dùng cho NPC)
+-- BKP: Teleport tức thời
 local function BKP(cf)
     local char = LP.Character
     if not char then return end
@@ -162,7 +164,7 @@ local function BKP(cf)
     end)
 end
 
--- SAFE FLY: Bay mượt bằng TweenService (dùng cho Quái)
+-- SAFE FLY: Bay mượt bằng TweenService
 local function SafeFly(targetCF)
     if not targetCF then return end
     local char = LP.Character
@@ -191,7 +193,7 @@ local function SafeFly(targetCF)
 end
 
 -- ============================================================
--- CHECK LEVEL (Tọa độ NPC Adventurer chuẩn từ Scan)
+-- CHECK LEVEL (Tọa độ NPC Adventurer chuẩn)
 -- ============================================================
 function CheckLevel()
     local lvl = LP.Data.Level.Value
@@ -407,11 +409,13 @@ task.spawn(function()
 end)
 
 -- ============================================================
--- FARM LOOP (BKP to NPC, SafeFly to Mob)
+-- FARM LOOP (Quest Lock - Chống kéo về NPC)
 -- ============================================================
 task.spawn(function()
     while task.wait(0.5) do
         if not (_G.AutoFarmLevel or _G.AutoFarmBoss) then
+            _hasQuest = false
+            _questMissingTime = 0
             _currentTween = nil
             continue
         end
@@ -439,17 +443,11 @@ task.spawn(function()
                 end
 
                 if targetBoss then
-                    local dist = (hrp.Position - targetBoss.HumanoidRootPart.Position).Magnitude
-                    if dist > 15 then
-                        SafeFly(CFrame.new(targetBoss.HumanoidRootPart.Position.X, targetBoss.HumanoidRootPart.Position.Y + _G.MobHoverHeight, targetBoss.HumanoidRootPart.Position.Z))
-                    end
+                    SafeFly(CFrame.new(targetBoss.HumanoidRootPart.Position.X, targetBoss.HumanoidRootPart.Position.Y + _G.MobHoverHeight, targetBoss.HumanoidRootPart.Position.Z))
                 else
                     local spawnCF = BossData[bossName]
                     if spawnCF then
-                        local dist = (hrp.Position - spawnCF.Position).Magnitude
-                        if dist > 15 then
-                            SafeFly(CFrame.new(spawnCF.X, spawnCF.Y + _G.MobHoverHeight, spawnCF.Z))
-                        end
+                        SafeFly(CFrame.new(spawnCF.X, spawnCF.Y + _G.MobHoverHeight, spawnCF.Z))
                     end
                 end
                 return
@@ -458,25 +456,38 @@ task.spawn(function()
             -- CHẾ ĐỘ 2: FARM LEVEL
             if _G.AutoFarmLevel then
                 CheckLevel()
-                if not Mon or not CFrameQ then return end
+                if not Mon then return end
 
                 local questVisible = false
                 pcall(function()
                     questVisible = LP.PlayerGui.Main.Quest.Visible
                 end)
 
-                -- Chưa có Quest -> BKP tới NPC (Teleport tức thời)
-                if not questVisible then
-                    local distToNPC = (hrp.Position - CFrameQ.Position).Magnitude
-                    local xzDist = (Vector2.new(hrp.Position.X, hrp.Position.Z) - Vector2.new(CFrameQ.X, CFrameQ.Z)).Magnitude
-                    
-                    -- Nếu ở xa, dùng BKP
-                    if distToNPC > 15 then
-                        BKP(CFrameQ)
+                -- QUEST LOCK LOGIC
+                if questVisible then
+                    _hasQuest = true
+                    _questMissingTime = 0
+                else
+                    if _hasQuest then
+                        -- Đã có Quest nhưng UI ẩn đột ngột -> Đợi 3 giây
+                        if _questMissingTime == 0 then
+                            _questMissingTime = tick()
+                        elseif (tick() - _questMissingTime) > 3 then
+                            -- Quá 3 giây không thấy Quest -> Mất Quest thật
+                            _hasQuest = false
+                            _questMissingTime = 0
+                        end
                     end
+                end
+
+                -- Chưa có Quest -> Bay tới NPC
+                if not _hasQuest then
+                    local distToNPC = (hrp.Position - CFrameQ.Position).Magnitude
                     
-                    -- Tới gần thì StartQuest
-                    if xzDist < 15 then
+                    -- Chỉ gửi StartQuest khi gần NPC
+                    if distToNPC > 15 then
+                        SafeFly(CFrameQ)
+                    else
                         if tick() - _lastQuestTime > 1 then
                             _lastQuestTime = tick()
                             CommF:InvokeServer("StartQuest", NameQuest, QuestLv)
@@ -485,7 +496,7 @@ task.spawn(function()
                     return
                 end
 
-                -- Đã có Quest -> SafeFly tới quái (Bay mượt)
+                -- Đang có Quest -> Bay tới quái
                 local enemies = Workspace:FindFirstChild("Enemies")
                 local targetMob, nearestDist = nil, math.huge
                 if enemies then
@@ -516,7 +527,7 @@ task.spawn(function()
 end)
 
 -- ============================================================
--- NOCLIP LOOP (Bay xuyên tường)
+-- NOCLIP LOOP
 -- ============================================================
 RunService.Stepped:Connect(function()
     if not (_G.AutoFarmLevel or _G.AutoFarmBoss) then return end
@@ -530,7 +541,7 @@ RunService.Stepped:Connect(function()
 end)
 
 -- ============================================================
--- BODY CLIP (Chống Snapback - Chỉ bật khi gần mục tiêu)
+-- BODY CLIP (Chỉ bật khi có Quest)
 -- ============================================================
 task.spawn(function()
     while task.wait() do
@@ -539,19 +550,18 @@ task.spawn(function()
                 local char = LP.Character
                 if char then
                     local hrp = char:FindFirstChild("HumanoidRootPart")
-                    local isFarming = false
-                    pcall(function()
-                        isFarming = LP.PlayerGui.Main.Quest.Visible
-                    end)
-                    
-                    if isFarming and not hrp:FindFirstChild("BodyClip") then
-                        local bv = Instance.new("BodyVelocity")
-                        bv.Name = "BodyClip"
-                        bv.MaxForce = Vector3.new(100000, 100000, 100000)
-                        bv.Velocity = Vector3.new(0, 0, 0)
-                        bv.Parent = hrp
-                    elseif not isFarming and hrp:FindFirstChild("BodyClip") then
-                        hrp.BodyClip:Destroy()
+                    if _hasQuest then
+                        if not hrp:FindFirstChild("BodyClip") then
+                            local bv = Instance.new("BodyVelocity")
+                            bv.Name = "BodyClip"
+                            bv.MaxForce = Vector3.new(100000, 100000, 100000)
+                            bv.Velocity = Vector3.new(0, 0, 0)
+                            bv.Parent = hrp
+                        end
+                    else
+                        if hrp:FindFirstChild("BodyClip") then
+                            hrp.BodyClip:Destroy()
+                        end
                     end
                 end
             else
@@ -577,6 +587,8 @@ FarmTab:CreateToggle({
    Callback = function(Value)
        _G.AutoFarmLevel = Value
        if Value then _G.AutoFarmBoss = false end
+       _hasQuest = false
+       _questMissingTime = 0
    end,
 })
 
