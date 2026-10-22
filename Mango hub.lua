@@ -1,5 +1,5 @@
 -- ============================================================
--- MANGO HUB 🥭 - V29 (World Origin TP + Orbit Fly)
+-- MANGO HUB 🥭 - V30 (Quest Lag Protection)
 -- Yêu cầu executor: cloneref, bit32, sethiddenproperty
 -- ============================================================
 
@@ -27,14 +27,17 @@ _G.WeaponType      = "Melee"
 _G.UseBypass       = true
 _G.MobHoverHeight  = 5
 _G.NPCHoverOffset  = 0
-_G.FlySpeed        = 60     -- Giảm tốc độ để chống snapback
+_G.FlySpeed        = 60
 _G.BringMobs       = false
 
 -- State
 local _targetCF = nil
 local _isStartingQuest = false
+local _questActive = false      -- Cờ xác nhận đang trong thời gian chờ Quest
+local _questGraceTime = 0       -- Mốc thời gian bắt đầu chờ
 local Mon, NameMon, NameQuest, QuestLv, CFrameQ, CFrameMon
 
+-- Boss Data
 local BossData = {
     ["The Gorilla King"] = CFrame.new(-1088.75, 8.13, -488.55),
     ["Bobby"]            = CFrame.new(-1087.37, 46.94, 4040.14),
@@ -61,7 +64,7 @@ local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
 local Window = Rayfield:CreateWindow({
    Name = "MANGO HUB 🥭",
-   LoadingTitle = "Mango Hub V29",
+   LoadingTitle = "Mango Hub V30",
    LoadingSubtitle = "by AI",
    ConfigurationSaving = { Enabled = false },
    KeySystem = false,
@@ -372,13 +375,14 @@ task.spawn(function()
 end)
 
 -- ============================================================
--- FARM LOOP
+-- FARM LOOP (Đã thêm Grace Period 3 giây chống lag Quest)
 -- ============================================================
 task.spawn(function()
     while task.wait(0.1) do
         if not (_G.AutoFarmLevel or _G.AutoFarmBoss) then
             _targetCF = nil
             _isStartingQuest = false
+            _questActive = false
             continue
         end
 
@@ -425,6 +429,20 @@ task.spawn(function()
                     questVisible = LP.PlayerGui.Main.Quest.Visible
                 end)
 
+                -- BẢO VỆ QUEST KHỎI LAG (Grace Period)
+                if _questActive then
+                    if questVisible then
+                        -- Nếu đã thấy Quest thật -> Tắt cờ chờ
+                        _questActive = false
+                    elseif (tick() - _questGraceTime) < 3 then
+                        -- Nếu chưa thấy Quest nhưng chưa hết 3s -> Giả vờ như đã có Quest
+                        questVisible = true
+                    else
+                        -- Hết 3s mà vẫn không thấy Quest -> Hủy cờ, quay về NPC
+                        _questActive = false
+                    end
+                end
+
                 if _isStartingQuest then questVisible = true end
 
                 -- Chưa có Quest -> Tới NPC
@@ -434,8 +452,11 @@ task.spawn(function()
                     local xzDist = (Vector2.new(hrp.Position.X, hrp.Position.Z) - Vector2.new(CFrameQ.X, CFrameQ.Z)).Magnitude
                     if xzDist < 15 and not _isStartingQuest then
                         _isStartingQuest = true
+                        -- Kích hoạt Grace Period
+                        _questActive = true
+                        _questGraceTime = tick()
                         ReplicatedStorage.Remotes.CommF_:InvokeServer("StartQuest", NameQuest, QuestLv)
-                        task.delay(3, function() _isStartingQuest = false end)
+                        task.delay(2, function() _isStartingQuest = false end)
                     end
                     return
                 end
@@ -635,4 +656,4 @@ SettingsTab:CreateToggle({
 })
 
 Rayfield:LoadConfiguration()
-print("[MANGO HUB] 🥭 V29 Loaded. World Origin TP + Orbit Fly.")
+print("[MANGO HUB] 🥭 V30 Loaded. Quest Lag Protection (Grace Period).")
