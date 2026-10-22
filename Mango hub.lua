@@ -1,7 +1,7 @@
 -- ============================================================
--- MANGO HUB 🥭 - Rayfield UI + Hover Farm (V12 - No Gather, Free Fly)
+-- MANGO HUB 🥭 - Rayfield UI + Hover Farm (V14 - True Tween2 Fix)
 -- Yêu cầu executor: cloneref, bit32, sethiddenproperty
--- Đã sửa: Bỏ check Quest Title (fix kẹt NPC), tắt gom quái mặc định.
+-- Đã sửa: Dùng Tween2 gốc (350 studs/s), tắt va chạm, không PlatformStand.
 -- ============================================================
 
 local Players           = game:GetService("Players")
@@ -27,13 +27,12 @@ _G.WeaponType      = "Melee"
 _G.UseBypass       = true
 _G.MobHoverHeight  = 5
 _G.NPCHoverOffset  = 5
-_G.HoverSpeed      = 150
-_G.BringMobs       = false  -- TẮT MẶC ĐỊNH ĐỂ TRÁNH LỖI QUÁI BỊ KÉO VỀ 1 CHỖ
+_G.BringMobs       = false
 
 -- State
 local _targetCF = nil
 local _targetMob = nil
-local _currentTween = nil
+local _isTweening = false
 local Mon, NameMon, NameQuest, QuestLv, CFrameQ, CFrameMon
 
 -- ============================================================
@@ -43,7 +42,7 @@ local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
 local Window = Rayfield:CreateWindow({
    Name = "MANGO HUB 🥭",
-   LoadingTitle = "Mango Hub V12",
+   LoadingTitle = "Mango Hub V14",
    LoadingSubtitle = "by AI",
    ConfigurationSaving = { Enabled = false },
    KeySystem = false,
@@ -124,6 +123,35 @@ local function AutoHaki()
     local char = LP.Character
     if char and not char:FindFirstChild("HasBuso") then
         pcall(function() ReplicatedStorage.Remotes.CommF_:InvokeServer("Buso") end)
+    end
+end
+
+-- Hàm Tween2 gốc từ hdanhhub
+local function Tween2(targetCF)
+    if not targetCF then return end
+    _isTweening = true
+    local char = LP.Character
+    if not char then return end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+    
+    local distance = (targetCF.Position - hrp.Position).Magnitude
+    local speed = 350
+    local tweenInfo = TweenInfo.new(distance / speed, Enum.EasingStyle.Linear)
+    local tween = TweenService:Create(hrp, tweenInfo, {CFrame = targetCF})
+    tween:Play()
+    tween.Completed:Wait()
+    _isTweening = false
+end
+
+-- Tắt va chạm (NoClip) để bay xuyên vật thể
+local function ApplyNoClip()
+    local char = LP.Character
+    if not char then return end
+    for _, v in ipairs(char:GetDescendants()) do
+        if v:IsA("BasePart") then
+            v.CanCollide = false
+        end
     end
 end
 
@@ -346,7 +374,7 @@ end
 -- ============================================================
 -- SCAN + FIRE
 -- ============================================================
-local function scanTargets(radius)
+local function scanTargets(radius, mobName)
     local char = LP.Character
     if not char then return {}, nil end
     local hrp = char:FindFirstChild("HumanoidRootPart")
@@ -363,13 +391,15 @@ local function scanTargets(radius)
                     local mhum = mob:FindFirstChild("Humanoid")
                     if mhrp and mhum and mhum.Health > 0
                        and (mhrp.Position - origin).Magnitude <= radius then
-                        for _, part in ipairs(mob:GetChildren()) do
-                            if part:IsA("BasePart") then
-                                table.insert(list, {mob, part})
+                        if not mobName or string.find(mob.Name, mobName) then
+                            for _, part in ipairs(mob:GetChildren()) do
+                                if part:IsA("BasePart") then
+                                    table.insert(list, {mob, part})
+                                end
                             end
-                        end
-                        if not firstHead then
-                            firstHead = mob:FindFirstChild("Head") or mhrp
+                            if not firstHead then
+                                firstHead = mob:FindFirstChild("Head") or mhrp
+                            end
                         end
                     end
                 end
@@ -422,11 +452,12 @@ task.spawn(function()
         if w then equipWeapon(w) end
         AutoHaki()
 
-        local list, head = scanTargets(_G.FarAttackRadius)
+        local targetName = _G.AutoFarmLevel and Mon or nil
+        local list, head = scanTargets(_G.FarAttackRadius, targetName)
+        
         if #list == 0 then continue end
 
-        -- Gom quái (nếu bật) về dưới chân
-        if _G.BringMobs then
+        if _G.BringMobs and not _isTweening then
             local hrp = char:FindFirstChild("HumanoidRootPart")
             if hrp then
                 local gatherPos = CFrame.new(hrp.Position.X, hrp.Position.Y - 3, hrp.Position.Z)
@@ -455,17 +486,20 @@ task.spawn(function()
 end)
 
 -- ============================================================
--- FARM LOOP (Tìm quái và cập nhật _targetCF)
+-- FARM LOOP
 -- ============================================================
 task.spawn(function()
-    while task.wait(0.1) do
+    while task.wait() do
         if not _G.AutoFarmLevel then
             _targetCF = nil
             _targetMob = nil
-            if _currentTween then pcall(function() _currentTween:Cancel() end); _currentTween = nil end
+            _isTweening = false
+            -- Bật lại va chạm khi tắt farm
             local char = LP.Character
-            if char and char:FindFirstChild("Humanoid") then
-                char.Humanoid.PlatformStand = false
+            if char then
+                for _, v in ipairs(char:GetDescendants()) do
+                    if v:IsA("BasePart") then v.CanCollide = true end
+                end
             end
             continue
         end
@@ -476,8 +510,8 @@ task.spawn(function()
         local hrp = char:FindFirstChild("HumanoidRootPart")
         if not hum or not hrp or hum.Health <= 0 then continue end
 
-        -- Bật PlatformStand để cơ thể lơ lửng
-        hum.PlatformStand = true
+        -- Tắt va chạm khi farm để bay xuyên vật thể
+        ApplyNoClip()
 
         pcall(function()
             CheckLevel()
@@ -488,23 +522,26 @@ task.spawn(function()
                 questVisible = LP.PlayerGui.Main.Quest.Visible
             end)
 
-            -- 1. Chưa có Quest -> Bay tới NPC
+            if _isTweening then return end
+
+            -- 1. Chưa có Quest -> Bay tới NPC bằng Tween2
             if not questVisible then
                 _targetMob = nil
-                _targetCF = CFrameQ * CFrame.new(0, _G.NPCHoverOffset, 0)
-                if (hrp.Position - CFrameQ.Position).Magnitude <= 15 then
+                if (hrp.Position - CFrameQ.Position).Magnitude > 15 then
+                    Tween2(CFrameQ * CFrame.new(0, _G.NPCHoverOffset, 0))
+                else
                     ReplicatedStorage.Remotes.CommF_:InvokeServer("StartQuest", NameQuest, QuestLv)
-                    task.wait(0.5)
+                    task.wait(1)
                 end
                 return
             end
 
-            -- 2. Đã có Quest -> Tìm quái
+            -- 2. Đã có Quest -> Tìm quái bằng string.find
             local targetMob = nil
             local enemies = Workspace:FindFirstChild("Enemies")
             if enemies then
                 for _, v in pairs(enemies:GetChildren()) do
-                    if v.Name == Mon and v:FindFirstChild("Humanoid") and v:FindFirstChild("HumanoidRootPart") and v.Humanoid.Health > 0 then
+                    if string.find(v.Name, Mon) and v:FindFirstChild("Humanoid") and v:FindFirstChild("HumanoidRootPart") and v.Humanoid.Health > 0 then
                         targetMob = v
                         break
                     end
@@ -513,52 +550,21 @@ task.spawn(function()
 
             if targetMob then
                 _targetMob = targetMob
-                _targetCF = targetMob.HumanoidRootPart.CFrame * CFrame.new(0, _G.MobHoverHeight, 0)
-            else
-                _targetMob = nil
-                _targetCF = CFrameMon * CFrame.new(0, _G.MobHoverHeight, 0)
-            end
-        end)
-    end
-end)
-
--- ============================================================
--- MOVEMENT LOOP (Bay tới _targetCF bằng Tween)
--- ============================================================
-task.spawn(function()
-    while task.wait(0.05) do
-        if not _G.AutoFarmLevel then
-            if _currentTween then pcall(function() _currentTween:Cancel() end); _currentTween = nil end
-            continue
-        end
-
-        local char = LP.Character
-        if not char then continue end
-        local hrp = char:FindFirstChild("HumanoidRootPart")
-        local hum = char:FindFirstChild("Humanoid")
-        if not hrp or not hum then continue end
-
-        if _targetCF then
-            if (hrp.Position - _targetCF.Position).Magnitude > 3000 then
-                hrp.CFrame = CFrame.new(hrp.Position + (_targetCF.Position - hrp.Position).Unit * 2000)
-            end
-
-            -- Nếu khoảng cách > 5, tween tới đích
-            if (hrp.Position - _targetCF.Position).Magnitude > 5 then
-                if not _currentTween or _currentTween.PlaybackState ~= Enum.PlaybackState.Playing then
-                    local dist = (hrp.Position - _targetCF.Position).Magnitude
-                    local duration = math.max(dist / _G.HoverSpeed, 0.1)
-                    _currentTween = TweenService:Create(hrp, TweenInfo.new(duration, Enum.EasingStyle.Linear), {CFrame = _targetCF})
-                    _currentTween:Play()
+                local mobCF = targetMob.HumanoidRootPart.CFrame * CFrame.new(0, _G.MobHoverHeight, 0)
+                if (hrp.Position - mobCF.Position).Magnitude > 5 then
+                    Tween2(mobCF)
+                else
+                    -- Ghim vị trí trên đầu quái
+                    hrp.CFrame = mobCF
+                    hrp.AssemblyLinearVelocity = Vector3.zero
+                    hrp.AssemblyAngularVelocity = Vector3.zero
                 end
             else
-                -- Đã tới nơi, ghim chặt
-                if _currentTween then pcall(function() _currentTween:Cancel() end); _currentTween = nil end
-                hrp.CFrame = _targetCF
-                hrp.AssemblyLinearVelocity = Vector3.zero
-                hrp.AssemblyAngularVelocity = Vector3.zero
+                _targetMob = nil
+                -- Không tìm thấy quái, đứng yên tại chỗ chờ spawn
+                task.wait(0.5)
             end
-        end
+        end)
     end
 end)
 
@@ -571,7 +577,7 @@ FarmTab:CreateToggle({
    Flag = "AutoFarmLevel",
    Callback = function(Value)
        _G.AutoFarmLevel = Value
-       if not Value then _targetCF = nil; _targetMob = nil end
+       if not Value then _targetCF = nil; _targetMob = nil; _isTweening = false end
    end,
 })
 
@@ -588,7 +594,7 @@ FarmTab:CreateSlider({
 })
 
 FarmTab:CreateToggle({
-   Name = "Gom Quái (Bring Mobs)",
+   Name = "Gom Quái",
    CurrentValue = false,
    Flag = "BringMobs",
    Callback = function(Value)
@@ -649,4 +655,4 @@ SettingsTab:CreateToggle({
 })
 
 Rayfield:LoadConfiguration()
-print("[MANGO HUB] 🥭 V12 Loaded. No Gather, Free Fly.")
+print("[MANGO HUB] 🥭 V14 Loaded. Tween2 applied.")
