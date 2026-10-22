@@ -1,5 +1,5 @@
 -- ============================================================
--- MANGO HUB 🥭 - V31 (Original Teleport Method - No Lag, No Snapback)
+-- MANGO HUB 🥭 - V32 (Anti Ping-pong Teleport)
 -- Yêu cầu executor: cloneref, bit32, sethiddenproperty
 -- ============================================================
 
@@ -30,7 +30,6 @@ _G.NPCHoverOffset  = 3
 _G.BringMobs       = false
 
 -- State
-local _targetCF = nil
 local _isStartingQuest = false
 local _questActive = false
 local _questGraceTime = 0
@@ -63,7 +62,7 @@ local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
 local Window = Rayfield:CreateWindow({
    Name = "MANGO HUB 🥭",
-   LoadingTitle = "Mango Hub V31",
+   LoadingTitle = "Mango Hub V32",
    LoadingSubtitle = "by AI",
    ConfigurationSaving = { Enabled = false },
    KeySystem = false,
@@ -148,9 +147,7 @@ local function AutoHaki()
     end
 end
 
--- ============================================================
--- BKP: TELEPORT TỨC THỜI (Lấy từ hdanhhub)
--- ============================================================
+-- BKP: TELEPORT TỨC THỜI
 local function BKP(cf)
     local char = LP.Character
     if not char then return end
@@ -389,10 +386,10 @@ task.spawn(function()
 end)
 
 -- ============================================================
--- FARM LOOP (Dùng BKP Teleport + Grace Period chống lag Quest)
+-- FARM LOOP (Anti Ping-pong)
 -- ============================================================
 task.spawn(function()
-    while task.wait() do
+    while task.wait(0.5) do -- Tăng delay để tránh spam ping-pong
         if not (_G.AutoFarmLevel or _G.AutoFarmBoss) then
             _isStartingQuest = false
             _questActive = false
@@ -429,7 +426,6 @@ task.spawn(function()
                         BKP(CFrame.new(spawnCF.X, spawnCF.Y + _G.MobHoverHeight, spawnCF.Z))
                     end
                 end
-                task.wait(0.1)
                 return
             end
 
@@ -455,9 +451,14 @@ task.spawn(function()
 
                 if _isStartingQuest then questVisible = true end
 
-                -- Chưa có Quest -> Teleport tới NPC
+                -- Chưa có Quest -> Tới NPC
                 if not questVisible then
-                    BKP(CFrameQ * CFrame.new(0, _G.NPCHoverOffset, 0))
+                    local distToNPC = (hrp.Position - CFrameQ.Position).Magnitude
+                    
+                    -- Chỉ BKP nếu ở xa NPC, còn ở gần thì đứng im
+                    if distToNPC > 15 then
+                        BKP(CFrameQ * CFrame.new(0, _G.NPCHoverOffset, 0))
+                    end
                     
                     local xzDist = (Vector2.new(hrp.Position.X, hrp.Position.Z) - Vector2.new(CFrameQ.X, CFrameQ.Z)).Magnitude
                     if xzDist < 15 and not _isStartingQuest then
@@ -467,11 +468,10 @@ task.spawn(function()
                         ReplicatedStorage.Remotes.CommF_:InvokeServer("StartQuest", NameQuest, QuestLv)
                         task.delay(2, function() _isStartingQuest = false end)
                     end
-                    task.wait(0.1)
                     return
                 end
 
-                -- Đã có Quest -> Tìm quái gần nhất và Teleport tới
+                -- Đã có Quest -> Tìm quái gần nhất
                 local enemies = Workspace:FindFirstChild("Enemies")
                 local targetMob, nearestDist = nil, math.huge
                 if enemies then
@@ -490,18 +490,20 @@ task.spawn(function()
                 end
 
                 if targetMob then
-                    BKP(CFrame.new(targetMob.HumanoidRootPart.Position.X, targetMob.HumanoidRootPart.Position.Y + _G.MobHoverHeight, targetMob.HumanoidRootPart.Position.Z))
+                    -- Nếu khoảng cách tới quái > 15 studs mới BKP
+                    if nearestDist > 15 then
+                        BKP(CFrame.new(targetMob.HumanoidRootPart.Position.X, targetMob.HumanoidRootPart.Position.Y + _G.MobHoverHeight, targetMob.HumanoidRootPart.Position.Z))
+                    end
                 else
-                    BKP(CFrame.new(CFrameMon.X, CFrameMon.Y + _G.MobHoverHeight, CFrameMon.Z))
+                    -- Không có quái -> Đứng im tại chỗ chờ (Không BKP đi đâu cả)
                 end
-                task.wait(0.1)
             end
         end)
     end
 end)
 
 -- ============================================================
--- BODY CLIP (Chống Snapback - Lấy từ hdanhhub)
+-- BODY CLIP (Chống Snapback)
 -- ============================================================
 task.spawn(function()
     while task.wait() do
@@ -622,4 +624,4 @@ SettingsTab:CreateToggle({
 })
 
 Rayfield:LoadConfiguration()
-print("[MANGO HUB] 🥭 V31 Loaded. Original Teleport Method (BKP + BodyClip).")
+print("[MANGO HUB] 🥭 V32 Loaded. Anti Ping-pong applied.")
