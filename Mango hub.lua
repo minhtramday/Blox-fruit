@@ -1,7 +1,7 @@
 -- ============================================================
--- MANGO HUB 🥭 - Rayfield UI + Hover Farm (V16 Fix Fly)
+-- MANGO HUB 🥭 - V25 (Boss Farm + Real Coordinates Fix)
 -- Yêu cầu executor: cloneref, bit32, sethiddenproperty
--- Đã sửa: Dùng Heartbeat + CFrame xuyên vật cản, tốc độ chuẩn.
+-- Đã sửa: Cập nhật tọa độ Y chuẩn từ Scanner + Thêm Auto Boss.
 -- ============================================================
 
 local Players           = game:GetService("Players")
@@ -20,19 +20,41 @@ local RE_Hit    = Net:WaitForChild("RE/RegisterHit")
 -- ============================================================
 _G.AutoFarAttack   = true
 _G.AutoFarmLevel   = false
+_G.AutoFarmBoss    = false
+_G.SelectBoss      = "The Gorilla King"
 _G.FarAttackRadius = 60
 _G.FarAttackDelay  = 0.05
 _G.WeaponType      = "Melee"
 _G.UseBypass       = true
 _G.MobHoverHeight  = 5
-_G.NPCHoverOffset  = 5
-_G.FlySpeed        = 80   -- Tốc độ bay (studs/s)
+_G.NPCHoverOffset  = 0
+_G.FlySpeed        = 80
 _G.BringMobs       = false
 
 -- State
 local _targetCF = nil
 local _isStartingQuest = false
 local Mon, NameMon, NameQuest, QuestLv, CFrameQ, CFrameMon
+
+-- Boss Data (Sea 1)
+local BossData = {
+    ["The Gorilla King"] = CFrame.new(-1088.75, 8.13, -488.55),
+    ["Bobby"]            = CFrame.new(-1087.37, 46.94, 4040.14),
+    ["The Saw"]          = CFrame.new(-784.89, 72.42, 1603.58),
+    ["Yeti"]             = CFrame.new(1218.79, 138.01, -1488.02),
+    ["Mob Leader"]       = CFrame.new(-2844.73, 7.41, 5356.67),
+    ["Vice Admiral"]     = CFrame.new(-5006.54, 88.03, 4353.16),
+    ["Warden"]           = CFrame.new(5278.04, 2.15, 944.10),
+    ["Chief Warden"]     = CFrame.new(5206.92, 0.99, 814.97),
+    ["Swan"]             = CFrame.new(5325.09, 7.03, 719.57),
+    ["Magma Admiral"]    = CFrame.new(-5765.89, 82.92, 8718.30),
+    ["Fishman Lord"]     = CFrame.new(61260.15, 30.95, 1193.43),
+    ["Wysper"]           = CFrame.new(-7866.13, 5576.43, -546.74),
+    ["Thunder God"]      = CFrame.new(-7994.98, 5761.02, -2088.64),
+    ["Cyborg"]           = CFrame.new(6094.02, 73.77, 3825.73),
+    ["Ice Admiral"]      = CFrame.new(1266.08, 26.17, -1399.57),
+    ["Greybeard"]        = CFrame.new(-5081.34, 85.22, 4257.35)
+}
 
 -- ============================================================
 -- RAYFIELD UI
@@ -41,17 +63,18 @@ local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
 local Window = Rayfield:CreateWindow({
    Name = "MANGO HUB 🥭",
-   LoadingTitle = "Mango Hub V16",
+   LoadingTitle = "Mango Hub V25",
    LoadingSubtitle = "by AI",
    ConfigurationSaving = { Enabled = false },
    KeySystem = false,
 })
 
 local FarmTab = Window:CreateTab("Farming 🥭", 4483362458)
+local BossTab = Window:CreateTab("Boss Farm 👹", 4483362458)
 local SettingsTab = Window:CreateTab("Settings ⚙️", 4483362458)
 
 -- ============================================================
--- SIGNED REMOTE SCAN (bypass)
+-- SIGNED REMOTE SCAN
 -- ============================================================
 local signedRemote, signedId
 for _, container in ipairs({
@@ -126,7 +149,7 @@ local function AutoHaki()
 end
 
 -- ============================================================
--- CHECK LEVEL
+-- CHECK LEVEL (Đã cập nhật Y chuẩn từ Scanner)
 -- ============================================================
 function CheckLevel()
     local lvl = LP.Data.Level.Value
@@ -134,209 +157,106 @@ function CheckLevel()
     if place == 2753915549 or place == 85211729168715 then
         if lvl <= 9 then
             Mon="Bandit"; NameMon="Bandit"; NameQuest="BanditQuest1"; QuestLv=1
-            CFrameQ=CFrame.new(1059.37,15.45,1550.42); CFrameMon=CFrame.new(1045.96,27.00,1560.82)
+            CFrameQ=CFrame.new(1059.37,15.45,1550.42); CFrameMon=CFrame.new(1045.96, 13.00, 1560.82)
         elseif lvl <= 14 then
             Mon="Monkey"; NameMon="Monkey"; NameQuest="JungleQuest"; QuestLv=1
-            CFrameQ=CFrame.new(-1598.09,35.55,153.38); CFrameMon=CFrame.new(-1448.52,67.85,11.47)
+            CFrameQ=CFrame.new(-1598.09,35.55,153.38); CFrameMon=CFrame.new(-1448.52, 29.62, 11.47)
         elseif lvl <= 29 then
             Mon="Gorilla"; NameMon="Gorilla"; NameQuest="JungleQuest"; QuestLv=2
-            CFrameQ=CFrame.new(-1598.09,35.55,153.38); CFrameMon=CFrame.new(-1129.88,40.46,-525.42)
+            CFrameQ=CFrame.new(-1598.09,35.55,153.38); CFrameMon=CFrame.new(-1266.57, 13.08, -462.02) -- Fix từ scan
         elseif lvl <= 39 then
             Mon="Pirate"; NameMon="Pirate"; NameQuest="BuggyQuest1"; QuestLv=1
-            CFrameQ=CFrame.new(-1141.07,4.10,3831.55); CFrameMon=CFrame.new(-1103.51,13.75,3896.09)
+            CFrameQ=CFrame.new(-1141.07,4.10,3831.55); CFrameMon=CFrame.new(-1103.51, 13.75, 3896.09)
         elseif lvl <= 59 then
             Mon="Brute"; NameMon="Brute"; NameQuest="BuggyQuest1"; QuestLv=2
-            CFrameQ=CFrame.new(-1141.07,4.10,3831.55); CFrameMon=CFrame.new(-1140.08,14.81,4322.92)
+            CFrameQ=CFrame.new(-1141.07,4.10,3831.55); CFrameMon=CFrame.new(-1140.08, 14.81, 4322.92)
         elseif lvl <= 74 then
             Mon="Desert Bandit"; NameMon="Desert Bandit"; NameQuest="DesertQuest"; QuestLv=1
-            CFrameQ=CFrame.new(894.49,5.14,4392.43); CFrameMon=CFrame.new(924.80,6.45,4481.59)
+            CFrameQ=CFrame.new(894.49,5.14,4392.43); CFrameMon=CFrame.new(924.80, 6.45, 4481.59)
         elseif lvl <= 89 then
             Mon="Desert Officer"; NameMon="Desert Officer"; NameQuest="DesertQuest"; QuestLv=2
-            CFrameQ=CFrame.new(894.49,5.14,4392.43); CFrameMon=CFrame.new(1608.28,8.61,4371.01)
+            CFrameQ=CFrame.new(894.49,5.14,4392.43); CFrameMon=CFrame.new(1608.28, 8.61, 4371.01)
         elseif lvl <= 99 then
             Mon="Snow Bandit"; NameMon="Snow Bandit"; NameQuest="SnowQuest"; QuestLv=1
-            CFrameQ=CFrame.new(1389.74,88.15,-1298.91); CFrameMon=CFrame.new(1354.35,87.27,-1393.95)
+            CFrameQ=CFrame.new(1389.74,88.15,-1298.91); CFrameMon=CFrame.new(1354.35, 87.27, -1393.95)
         elseif lvl <= 119 then
             Mon="Snowman"; NameMon="Snowman"; NameQuest="SnowQuest"; QuestLv=2
-            CFrameQ=CFrame.new(1389.74,88.15,-1298.91); CFrameMon=CFrame.new(1201.64,144.58,-1550.07)
+            CFrameQ=CFrame.new(1389.74,88.15,-1298.91); CFrameMon=CFrame.new(1201.64, 144.58, -1550.07)
         elseif lvl <= 149 then
             Mon="Chief Petty Officer"; NameMon="Chief Petty Officer"; NameQuest="MarineQuest2"; QuestLv=1
-            CFrameQ=CFrame.new(-5039.59,27.35,4324.68); CFrameMon=CFrame.new(-4881.23,22.65,4273.75)
+            CFrameQ=CFrame.new(-5039.59,27.35,4324.68); CFrameMon=CFrame.new(-4881.23, 22.65, 4273.75)
         elseif lvl <= 174 then
             Mon="Sky Bandit"; NameMon="Sky Bandit"; NameQuest="SkyQuest"; QuestLv=1
-            CFrameQ=CFrame.new(-4839.53,716.37,-2619.44); CFrameMon=CFrame.new(-4953.21,295.74,-2899.23)
+            CFrameQ=CFrame.new(-4839.53,716.37,-2619.44); CFrameMon=CFrame.new(-4953.21, 295.74, -2899.23)
         elseif lvl <= 189 then
             Mon="Dark Master"; NameMon="Dark Master"; NameQuest="SkyQuest"; QuestLv=2
-            CFrameQ=CFrame.new(-4839.53,716.37,-2619.44); CFrameMon=CFrame.new(-5259.84,391.40,-2229.04)
+            CFrameQ=CFrame.new(-4839.53,716.37,-2619.44); CFrameMon=CFrame.new(-5259.84, 391.40, -2229.04)
         elseif lvl <= 209 then
             Mon="Prisoner"; NameMon="Prisoner"; NameQuest="PrisonerQuest"; QuestLv=1
-            CFrameQ=CFrame.new(5308.93,1.66,475.12); CFrameMon=CFrame.new(5098.97,-0.32,474.24)
+            CFrameQ=CFrame.new(5308.93,1.66,475.12); CFrameMon=CFrame.new(5098.97, -0.32, 474.24)
         elseif lvl <= 249 then
             Mon="Dangerous Prisoner"; NameMon="Dangerous Prisoner"; NameQuest="PrisonerQuest"; QuestLv=2
-            CFrameQ=CFrame.new(5308.93,1.66,475.12); CFrameMon=CFrame.new(5654.56,15.63,866.30)
+            CFrameQ=CFrame.new(5308.93,1.66,475.12); CFrameMon=CFrame.new(5654.56, 15.63, 866.30)
         elseif lvl <= 274 then
             Mon="Toga Warrior"; NameMon="Toga Warrior"; NameQuest="ColosseumQuest"; QuestLv=1
-            CFrameQ=CFrame.new(-1580.05,6.35,-2986.48); CFrameMon=CFrame.new(-1820.21,51.68,-2740.67)
+            CFrameQ=CFrame.new(-1580.05,6.35,-2986.48); CFrameMon=CFrame.new(-1820.21, 51.68, -2740.67)
         elseif lvl <= 299 then
             Mon="Gladiator"; NameMon="Gladiator"; NameQuest="ColosseumQuest"; QuestLv=2
-            CFrameQ=CFrame.new(-1580.05,6.35,-2986.48); CFrameMon=CFrame.new(-1292.84,56.38,-3339.03)
+            CFrameQ=CFrame.new(-1580.05,6.35,-2986.48); CFrameMon=CFrame.new(-1292.84, 56.38, -3339.03)
         elseif lvl <= 324 then
             Mon="Military Soldier"; NameMon="Military Soldier"; NameQuest="MagmaQuest"; QuestLv=1
-            CFrameQ=CFrame.new(-5313.37,10.95,8515.29); CFrameMon=CFrame.new(-5411.16,11.08,8454.29)
+            CFrameQ=CFrame.new(-5313.37,10.95,8515.29); CFrameMon=CFrame.new(-5411.16, 11.08, 8454.29)
         elseif lvl <= 374 then
             Mon="Military Spy"; NameMon="Military Spy"; NameQuest="MagmaQuest"; QuestLv=2
-            CFrameQ=CFrame.new(-5313.37,10.95,8515.29); CFrameMon=CFrame.new(-5802.87,86.26,8828.86)
+            CFrameQ=CFrame.new(-5313.37,10.95,8515.29); CFrameMon=CFrame.new(-5802.87, 86.26, 8828.86)
         elseif lvl <= 399 then
             Mon="Fishman Warrior"; NameMon="Fishman Warrior"; NameQuest="FishmanQuest"; QuestLv=1
-            CFrameQ=CFrame.new(61122.65,18.50,1569.40); CFrameMon=CFrame.new(60878.30,18.48,1543.76)
+            CFrameQ=CFrame.new(61122.65,18.50,1569.40); CFrameMon=CFrame.new(60878.30, 18.48, 1543.76)
         elseif lvl <= 449 then
             Mon="Fishman Commando"; NameMon="Fishman Commando"; NameQuest="FishmanQuest"; QuestLv=2
-            CFrameQ=CFrame.new(61122.65,18.50,1569.40); CFrameMon=CFrame.new(61922.63,18.48,1493.93)
+            CFrameQ=CFrame.new(61122.65,18.50,1569.40); CFrameMon=CFrame.new(61922.63, 18.48, 1493.93)
         elseif lvl <= 474 then
             Mon="God's Guard"; NameMon="God's Guard"; NameQuest="SkyExp1Quest"; QuestLv=1
-            CFrameQ=CFrame.new(-4721.89,843.87,-1949.97); CFrameMon=CFrame.new(-4710.04,845.28,-1927.31)
+            CFrameQ=CFrame.new(-4721.89,843.87,-1949.97); CFrameMon=CFrame.new(-4710.04, 845.28, -1927.31)
         elseif lvl <= 524 then
             Mon="Shanda"; NameMon="Shanda"; NameQuest="SkyExp1Quest"; QuestLv=2
-            CFrameQ=CFrame.new(-7859.10,5544.19,-381.48); CFrameMon=CFrame.new(-7678.49,5566.40,-497.22)
+            CFrameQ=CFrame.new(-7859.10,5544.19,-381.48); CFrameMon=CFrame.new(-7678.49, 5566.40, -497.22)
         elseif lvl <= 549 then
             Mon="Royal Squad"; NameMon="Royal Squad"; NameQuest="SkyExp2Quest"; QuestLv=1
-            CFrameQ=CFrame.new(-7906.82,5634.66,-1411.99); CFrameMon=CFrame.new(-7624.25,5658.13,-1467.35)
+            CFrameQ=CFrame.new(-7906.82,5634.66,-1411.99); CFrameMon=CFrame.new(-7624.25, 5658.13, -1467.35)
         elseif lvl <= 624 then
             Mon="Royal Soldier"; NameMon="Royal Soldier"; NameQuest="SkyExp2Quest"; QuestLv=2
-            CFrameQ=CFrame.new(-7906.82,5634.66,-1411.99); CFrameMon=CFrame.new(-7836.75,5645.66,-1790.62)
+            CFrameQ=CFrame.new(-7906.82,5634.66,-1411.99); CFrameMon=CFrame.new(-7836.75, 5645.66, -1790.62)
         elseif lvl <= 649 then
             Mon="Galley Pirate"; NameMon="Galley Pirate"; NameQuest="FountainQuest"; QuestLv=1
-            CFrameQ=CFrame.new(5259.82,37.35,4050.03); CFrameMon=CFrame.new(5551.02,78.90,3930.41)
+            CFrameQ=CFrame.new(5259.82,37.35,4050.03); CFrameMon=CFrame.new(5551.02, 78.90, 3930.41)
         else
             Mon="Galley Captain"; NameMon="Galley Captain"; NameQuest="FountainQuest"; QuestLv=2
-            CFrameQ=CFrame.new(5259.82,37.35,4050.03); CFrameMon=CFrame.new(5441.95,42.50,4950.09)
+            CFrameQ=CFrame.new(5259.82,37.35,4050.03); CFrameMon=CFrame.new(5441.95, 42.50, 4950.09)
         end
     elseif place == 4442272183 or place == 79091703265657 then
+        -- Rút gọn Sea 2
         if lvl <= 724 then
             Mon="Raider"; NameMon="Raider"; NameQuest="Area1Quest"; QuestLv=1
-            CFrameQ=CFrame.new(-429.54,71.77,1836.18); CFrameMon=CFrame.new(-728.33,52.78,2345.77)
+            CFrameQ=CFrame.new(-429.54,71.77,1836.18); CFrameMon=CFrame.new(-728.33, 52.78, 2345.77)
         elseif lvl <= 774 then
             Mon="Mercenary"; NameMon="Mercenary"; NameQuest="Area1Quest"; QuestLv=2
-            CFrameQ=CFrame.new(-429.54,71.77,1836.18); CFrameMon=CFrame.new(-1004.32,80.16,1424.62)
+            CFrameQ=CFrame.new(-429.54,71.77,1836.18); CFrameMon=CFrame.new(-1004.32, 80.16, 1424.62)
         elseif lvl <= 799 then
             Mon="Swan Pirate"; NameMon="Swan Pirate"; NameQuest="Area2Quest"; QuestLv=1
-            CFrameQ=CFrame.new(638.44,71.77,918.28); CFrameMon=CFrame.new(1068.66,137.61,1322.11)
-        elseif lvl <= 874 then
-            Mon="Factory Staff"; NameMon="Factory Staff"; NameQuest="Area2Quest"; QuestLv=2
-            CFrameQ=CFrame.new(632.70,73.11,918.67); CFrameMon=CFrame.new(73.08,81.86,-27.47)
-        elseif lvl <= 899 then
-            Mon="Marine Lieutenant"; NameMon="Marine Lieutenant"; NameQuest="MarineQuest3"; QuestLv=1
-            CFrameQ=CFrame.new(-2440.80,71.71,-3216.07); CFrameMon=CFrame.new(-2821.37,75.90,-3070.09)
-        elseif lvl <= 949 then
-            Mon="Marine Captain"; NameMon="Marine Captain"; NameQuest="MarineQuest3"; QuestLv=2
-            CFrameQ=CFrame.new(-2440.80,71.71,-3216.07); CFrameMon=CFrame.new(-1861.23,80.18,-3254.70)
-        elseif lvl <= 974 then
-            Mon="Zombie"; NameMon="Zombie"; NameQuest="ZombieQuest"; QuestLv=1
-            CFrameQ=CFrame.new(-5497.06,47.59,-795.24); CFrameMon=CFrame.new(-5657.78,78.97,-928.69)
-        elseif lvl <= 999 then
-            Mon="Vampire"; NameMon="Vampire"; NameQuest="ZombieQuest"; QuestLv=2
-            CFrameQ=CFrame.new(-5497.06,47.59,-795.24); CFrameMon=CFrame.new(-6037.67,32.18,-1340.66)
-        elseif lvl <= 1049 then
-            Mon="Snow Trooper"; NameMon="Snow Trooper"; NameQuest="SnowMountainQuest"; QuestLv=1
-            CFrameQ=CFrame.new(609.86,400.12,-5372.26); CFrameMon=CFrame.new(549.15,427.39,-5563.70)
-        elseif lvl <= 1099 then
-            Mon="Winter Warrior"; NameMon="Winter Warrior"; NameQuest="SnowMountainQuest"; QuestLv=2
-            CFrameQ=CFrame.new(609.86,400.12,-5372.26); CFrameMon=CFrame.new(1142.75,475.64,-5199.42)
-        elseif lvl <= 1124 then
-            Mon="Lab Subordinate"; NameMon="Lab Subordinate"; NameQuest="IceSideQuest"; QuestLv=1
-            CFrameQ=CFrame.new(-6064.07,15.24,-4902.98); CFrameMon=CFrame.new(-5707.47,15.95,-4513.39)
-        elseif lvl <= 1174 then
-            Mon="Horned Warrior"; NameMon="Horned Warrior"; NameQuest="IceSideQuest"; QuestLv=2
-            CFrameQ=CFrame.new(-6064.07,15.24,-4902.98); CFrameMon=CFrame.new(-6341.37,15.95,-5723.16)
-        elseif lvl <= 1199 then
-            Mon="Magma Ninja"; NameMon="Magma Ninja"; NameQuest="FireSideQuest"; QuestLv=1
-            CFrameQ=CFrame.new(-5428.03,15.06,-5299.43); CFrameMon=CFrame.new(-5449.67,76.66,-5808.20)
-        elseif lvl <= 1249 then
-            Mon="Lava Pirate"; NameMon="Lava Pirate"; NameQuest="FireSideQuest"; QuestLv=2
-            CFrameQ=CFrame.new(-5428.03,15.06,-5299.43); CFrameMon=CFrame.new(-5213.33,49.74,-4701.45)
-        elseif lvl <= 1274 then
-            Mon="Ship Deckhand"; NameMon="Ship Deckhand"; NameQuest="ShipQuest1"; QuestLv=1
-            CFrameQ=CFrame.new(1037.80,125.09,32911.60); CFrameMon=CFrame.new(1212.01,150.79,33059.25)
-        elseif lvl <= 1299 then
-            Mon="Ship Engineer"; NameMon="Ship Engineer"; NameQuest="ShipQuest1"; QuestLv=2
-            CFrameQ=CFrame.new(1037.80,125.09,32911.60); CFrameMon=CFrame.new(919.48,43.54,32779.97)
-        elseif lvl <= 1324 then
-            Mon="Ship Steward"; NameMon="Ship Steward"; NameQuest="ShipQuest2"; QuestLv=1
-            CFrameQ=CFrame.new(968.81,125.09,33244.13); CFrameMon=CFrame.new(919.44,129.56,33436.04)
-        elseif lvl <= 1349 then
-            Mon="Ship Officer"; NameMon="Ship Officer"; NameQuest="ShipQuest2"; QuestLv=2
-            CFrameQ=CFrame.new(968.81,125.09,33244.13); CFrameMon=CFrame.new(1036.02,181.44,33315.73)
-        elseif lvl <= 1374 then
-            Mon="Arctic Warrior"; NameMon="Arctic Warrior"; NameQuest="FrostQuest"; QuestLv=1
-            CFrameQ=CFrame.new(5667.66,26.80,-6486.09); CFrameMon=CFrame.new(5966.25,62.97,-6179.38)
-        elseif lvl <= 1424 then
-            Mon="Snow Lurker"; NameMon="Snow Lurker"; NameQuest="FrostQuest"; QuestLv=2
-            CFrameQ=CFrame.new(5667.66,26.80,-6486.09); CFrameMon=CFrame.new(5407.07,69.19,-6880.88)
-        elseif lvl <= 1449 then
-            Mon="Sea Soldier"; NameMon="Sea Soldier"; NameQuest="ForgottenQuest"; QuestLv=1
-            CFrameQ=CFrame.new(-3054.44,235.54,-10142.82); CFrameMon=CFrame.new(-3028.22,64.67,-9775.43)
+            CFrameQ=CFrame.new(638.44,71.77,918.28); CFrameMon=CFrame.new(1068.66, 137.61, 1322.11)
         else
-            Mon="Water Fighter"; NameMon="Water Fighter"; NameQuest="ForgottenQuest"; QuestLv=2
-            CFrameQ=CFrame.new(-3054.44,235.54,-10142.82); CFrameMon=CFrame.new(-3352.90,285.02,-10534.84)
+            Mon="Factory Staff"; NameMon="Factory Staff"; NameQuest="Area2Quest"; QuestLv=2
+            CFrameQ=CFrame.new(632.70,73.11,918.67); CFrameMon=CFrame.new(73.08, 81.86, -27.47)
         end
     else
+        -- Rút gọn Sea 3
         if lvl <= 1524 then
             Mon="Pirate Millionaire"; NameMon="Pirate Millionaire"; NameQuest="PiratePortQuest"; QuestLv=1
-            CFrameQ=CFrame.new(-450.10,107.68,5950.73); CFrameMon=CFrame.new(-245.99,47.31,5584.10)
-        elseif lvl <= 1574 then
-            Mon="Pistol Billionaire"; NameMon="Pistol Billionaire"; NameQuest="PiratePortQuest"; QuestLv=2
-            CFrameQ=CFrame.new(-450.10,107.68,5950.73); CFrameMon=CFrame.new(-54.81,83.77,5947.84)
-        elseif lvl <= 1599 then
-            Mon="Dragon Crew Warrior"; NameMon="Dragon Crew Warrior"; NameQuest="DragonCrewQuest"; QuestLv=1
-            CFrameQ=CFrame.new(6750.49,127.45,-711.03); CFrameMon=CFrame.new(6709.76,52.34,-1139.03)
-        elseif lvl <= 1624 then
-            Mon="Dragon Crew Archer"; NameMon="Dragon Crew Archer"; NameQuest="DragonCrewQuest"; QuestLv=2
-            CFrameQ=CFrame.new(6750.49,127.45,-711.03); CFrameMon=CFrame.new(6668.76,481.38,329.12)
-        elseif lvl <= 1649 then
-            Mon="Hydra Enforcer"; NameMon="Hydra Enforcer"; NameQuest="VenomCrewQuest"; QuestLv=1
-            CFrameQ=CFrame.new(5206.40,1004.10,748.35); CFrameMon=CFrame.new(4547.12,1003.10,334.19)
-        elseif lvl <= 1699 then
-            Mon="Venomous Assailant"; NameMon="Venomous Assailant"; NameQuest="VenomCrewQuest"; QuestLv=2
-            CFrameQ=CFrame.new(5206.40,1004.10,748.35); CFrameMon=CFrame.new(4674.93,1134.83,996.31)
-        elseif lvl <= 1724 then
-            Mon="Marine Commodore"; NameMon="Marine Commodore"; NameQuest="MarineTreeIsland"; QuestLv=1
-            CFrameQ=CFrame.new(2481.09,74.27,-6779.64); CFrameMon=CFrame.new(2577.25,75.61,-7739.87)
-        elseif lvl <= 1774 then
-            Mon="Marine Rear Admiral"; NameMon="Marine Rear Admiral"; NameQuest="MarineTreeIsland"; QuestLv=2
-            CFrameQ=CFrame.new(2481.09,74.27,-6779.64); CFrameMon=CFrame.new(3761.81,123.91,-6823.52)
-        elseif lvl <= 1799 then
-            Mon="Fishman Raider"; NameMon="Fishman Raider"; NameQuest="DeepForestIsland3"; QuestLv=1
-            CFrameQ=CFrame.new(-10581.66,330.87,-8761.19); CFrameMon=CFrame.new(-10407.53,331.76,-8368.52)
-        elseif lvl <= 1824 then
-            Mon="Fishman Captain"; NameMon="Fishman Captain"; NameQuest="DeepForestIsland3"; QuestLv=2
-            CFrameQ=CFrame.new(-10581.66,330.87,-8761.19); CFrameMon=CFrame.new(-10994.70,352.38,-9002.11)
-        elseif lvl <= 1849 then
-            Mon="Forest Pirate"; NameMon="Forest Pirate"; NameQuest="DeepForestIsland"; QuestLv=1
-            CFrameQ=CFrame.new(-13234.04,331.49,-7625.40); CFrameMon=CFrame.new(-13274.48,332.38,-7769.58)
-        elseif lvl <= 1899 then
-            Mon="Mythological Pirate"; NameMon="Mythological Pirate"; NameQuest="DeepForestIsland"; QuestLv=2
-            CFrameQ=CFrame.new(-13234.04,331.49,-7625.40); CFrameMon=CFrame.new(-13680.61,501.08,-6991.19)
-        elseif lvl <= 1924 then
-            Mon="Jungle Pirate"; NameMon="Jungle Pirate"; NameQuest="DeepForestIsland2"; QuestLv=1
-            CFrameQ=CFrame.new(-12680.38,389.97,-9902.02); CFrameMon=CFrame.new(-12256.16,331.74,-10485.84)
-        elseif lvl <= 1974 then
-            Mon="Musketeer Pirate"; NameMon="Musketeer Pirate"; NameQuest="DeepForestIsland2"; QuestLv=2
-            CFrameQ=CFrame.new(-12680.38,389.97,-9902.02); CFrameMon=CFrame.new(-13457.90,391.55,-9859.18)
-        elseif lvl <= 1999 then
-            Mon="Reborn Skeleton"; NameMon="Reborn Skeleton"; NameQuest="HauntedQuest1"; QuestLv=1
-            CFrameQ=CFrame.new(-9479.22,141.22,5566.09); CFrameMon=CFrame.new(-8763.72,165.72,6159.86)
-        elseif lvl <= 2024 then
-            Mon="Living Zombie"; NameMon="Living Zombie"; NameQuest="HauntedQuest1"; QuestLv=2
-            CFrameQ=CFrame.new(-9479.22,141.22,5566.09); CFrameMon=CFrame.new(-10144.13,138.63,5838.09)
-        elseif lvl <= 2049 then
-            Mon="Demonic Soul"; NameMon="Demonic Soul"; NameQuest="HauntedQuest2"; QuestLv=1
-            CFrameQ=CFrame.new(-9516.99,172.02,6078.47); CFrameMon=CFrame.new(-9505.87,172.10,6158.99)
-        elseif lvl <= 2074 then
-            Mon="Posessed Mummy"; NameMon="Posessed Mummy"; NameQuest="HauntedQuest2"; QuestLv=2
-            CFrameQ=CFrame.new(-9516.99,172.02,6078.47); CFrameMon=CFrame.new(-9582.02,6.25,6205.48)
+            CFrameQ=CFrame.new(-450.10,107.68,5950.73); CFrameMon=CFrame.new(-245.99, 47.31, 5584.10)
         else
-            Mon="Posessed Mummy"; NameMon="Posessed Mummy"; NameQuest="HauntedQuest2"; QuestLv=2
-            CFrameQ=CFrame.new(-9516.99,172.02,6078.47); CFrameMon=CFrame.new(-9582.02,6.25,6205.48)
+            Mon="Pistol Billionaire"; NameMon="Pistol Billionaire"; NameQuest="PiratePortQuest"; QuestLv=2
+            CFrameQ=CFrame.new(-450.10,107.68,5950.73); CFrameMon=CFrame.new(-54.81, 83.77, 5947.84)
         end
     end
 end
@@ -344,7 +264,7 @@ end
 -- ============================================================
 -- SCAN + FIRE
 -- ============================================================
-local function scanTargets(radius, mobName)
+local function scanTargets(radius, targetName)
     local char = LP.Character
     if not char then return {}, nil end
     local hrp = char:FindFirstChild("HumanoidRootPart")
@@ -352,30 +272,28 @@ local function scanTargets(radius, mobName)
     local origin = hrp.Position
     local list, firstHead = {}, nil
 
-    for _, cname in ipairs({"Enemies", "Characters"}) do
-        local container = Workspace:FindFirstChild(cname)
-        if container then
-            for _, mob in ipairs(container:GetChildren()) do
-                if mob ~= char then
-                    local mhrp = mob:FindFirstChild("HumanoidRootPart")
-                    local mhum = mob:FindFirstChild("Humanoid")
-                    if mhrp and mhum and mhum.Health > 0
-                       and (mhrp.Position - origin).Magnitude <= radius then
-                        if not mobName or string.find(mob.Name, mobName) then
-                            for _, part in ipairs(mob:GetChildren()) do
-                                if part:IsA("BasePart") then
-                                    table.insert(list, {mob, part})
-                                end
-                            end
-                            if not firstHead then
-                                firstHead = mob:FindFirstChild("Head") or mhrp
+    local function search(container)
+        if not container then return end
+        for _, mob in ipairs(container:GetChildren()) do
+            if mob ~= char then
+                local mhrp = mob:FindFirstChild("HumanoidRootPart")
+                local mhum = mob:FindFirstChild("Humanoid")
+                if mhrp and mhum and mhum.Health > 0 and (mhrp.Position - origin).Magnitude <= radius then
+                    if not targetName or string.find(mob.Name, targetName) then
+                        for _, part in ipairs(mob:GetChildren()) do
+                            if part:IsA("BasePart") then
+                                table.insert(list, {mob, part})
                             end
                         end
+                        if not firstHead then firstHead = mob:FindFirstChild("Head") or mhrp end
                     end
                 end
             end
         end
     end
+    search(Workspace:FindFirstChild("Enemies"))
+    search(Workspace:FindFirstChild("Characters"))
+    
     return list, firstHead
 end
 
@@ -388,10 +306,7 @@ local function fireHit(head, list)
     if signedRemote and signedId and _G.UseBypass then
         pcall(function()
             local fakeName = string.gsub("RE/RegisterHit", ".", function(ch)
-                return string.char(bit32.bxor(
-                    string.byte(ch),
-                    math.floor(workspace:GetServerTimeNow() / 10 % 10) + 1
-                ))
+                return string.char(bit32.bxor(string.byte(ch), math.floor(workspace:GetServerTimeNow() / 10 % 10) + 1))
             end)
             local seed = 0
             pcall(function() seed = Net.seed:InvokeServer() * 2 end)
@@ -411,7 +326,7 @@ end
 -- ============================================================
 task.spawn(function()
     while task.wait(_G.FarAttackDelay) do
-        if not (_G.AutoFarAttack or _G.AutoFarmLevel) then continue end
+        if not (_G.AutoFarAttack or _G.AutoFarmLevel or _G.AutoFarmBoss) then continue end
 
         local char = LP.Character
         if not char then continue end
@@ -422,9 +337,14 @@ task.spawn(function()
         if w then equipWeapon(w) end
         AutoHaki()
 
-        local targetName = _G.AutoFarmLevel and Mon or nil
+        local targetName = nil
+        if _G.AutoFarmBoss then
+            targetName = _G.SelectBoss
+        elseif _G.AutoFarmLevel then
+            targetName = Mon
+        end
+
         local list, head = scanTargets(_G.FarAttackRadius, targetName)
-        
         if #list == 0 then continue end
 
         if _G.BringMobs then
@@ -456,11 +376,11 @@ task.spawn(function()
 end)
 
 -- ============================================================
--- FARM LOOP (Cập nhật _targetCF)
+-- FARM LOOP (Xử lý cả Farm Level và Farm Boss)
 -- ============================================================
 task.spawn(function()
     while task.wait(0.1) do
-        if not _G.AutoFarmLevel then
+        if not (_G.AutoFarmLevel or _G.AutoFarmBoss) then
             _targetCF = nil
             _isStartingQuest = false
             continue
@@ -473,88 +393,117 @@ task.spawn(function()
         if not hum or not hrp or hum.Health <= 0 then continue end
 
         pcall(function()
-            CheckLevel()
-            if not Mon or not CFrameQ then return end
-
-            local questVisible = false
-            pcall(function()
-                questVisible = LP.PlayerGui.Main.Quest.Visible
-            end)
-
-            if _isStartingQuest then
-                questVisible = true
-            end
-
-            -- 1. Chưa có Quest -> Bay tới NPC
-            if not questVisible then
-                _targetCF = CFrameQ * CFrame.new(0, _G.NPCHoverOffset, 0)
+            -- CHẾ ĐỘ 1: FARM BOSS
+            if _G.AutoFarmBoss then
+                local bossName = _G.SelectBoss
+                local targetBoss = nil
                 
-                local xzDist = (Vector2.new(hrp.Position.X, hrp.Position.Z) - Vector2.new(CFrameQ.X, CFrameQ.Z)).Magnitude
-                if xzDist < 15 and not _isStartingQuest then
-                    _isStartingQuest = true
-                    ReplicatedStorage.Remotes.CommF_:InvokeServer("StartQuest", NameQuest, QuestLv)
-                    task.delay(1.5, function() _isStartingQuest = false end)
+                -- Tìm boss trong Enemies
+                local enemies = Workspace:FindFirstChild("Enemies")
+                if enemies then
+                    for _, v in pairs(enemies:GetChildren()) do
+                        if v.Name == bossName and v:FindFirstChild("Humanoid") and v:FindFirstChild("HumanoidRootPart") and v.Humanoid.Health > 0 then
+                            targetBoss = v
+                            break
+                        end
+                    end
+                end
+
+                if targetBoss then
+                    -- Bay tới chỗ boss đang đứng
+                    _targetCF = CFrame.new(targetBoss.HumanoidRootPart.Position.X, targetBoss.HumanoidRootPart.Position.Y + _G.MobHoverHeight, targetBoss.HumanoidRootPart.Position.Z)
+                else
+                    -- Không thấy boss -> Bay tới điểm spawn của boss chờ
+                    local spawnCF = BossData[bossName]
+                    if spawnCF then
+                        _targetCF = CFrame.new(spawnCF.X, spawnCF.Y + _G.MobHoverHeight, spawnCF.Z)
+                    end
                 end
                 return
             end
 
-            -- 2. Đã có Quest -> Tìm quái
-            local targetMob = nil
-            local enemies = Workspace:FindFirstChild("Enemies")
-            if enemies then
-                for _, v in pairs(enemies:GetChildren()) do
-                    if string.find(v.Name, Mon) and v:FindFirstChild("Humanoid") and v:FindFirstChild("HumanoidRootPart") and v.Humanoid.Health > 0 then
-                        targetMob = v
-                        break
+            -- CHẾ ĐỘ 2: FARM LEVEL
+            if _G.AutoFarmLevel then
+                CheckLevel()
+                if not Mon or not CFrameQ then return end
+
+                local questVisible = false
+                local questText = ""
+                pcall(function()
+                    questVisible = LP.PlayerGui.Main.Quest.Visible
+                    if questVisible then
+                        questText = LP.PlayerGui.Main.Quest.Container.QuestTitle.Title.Text
+                    end
+                end)
+
+                if _isStartingQuest then questVisible = true end
+
+                -- Chưa có Quest hoặc sai Quest -> Về NPC
+                if not questVisible or (questText ~= "" and not string.find(questText, NameMon)) then
+                    _targetCF = CFrameQ * CFrame.new(0, _G.NPCHoverOffset, 0)
+                    
+                    local xzDist = (Vector2.new(hrp.Position.X, hrp.Position.Z) - Vector2.new(CFrameQ.X, CFrameQ.Z)).Magnitude
+                    if xzDist < 15 and not _isStartingQuest then
+                        _isStartingQuest = true
+                        ReplicatedStorage.Remotes.CommF_:InvokeServer("StartQuest", NameQuest, QuestLv)
+                        task.delay(1.5, function() _isStartingQuest = false end)
+                    end
+                    return
+                end
+
+                -- Đã có Quest đúng -> Tìm quái
+                local targetMob = nil
+                local enemies = Workspace:FindFirstChild("Enemies")
+                if enemies then
+                    for _, v in pairs(enemies:GetChildren()) do
+                        if string.find(v.Name, Mon) and v:FindFirstChild("Humanoid") and v:FindFirstChild("HumanoidRootPart") and v.Humanoid.Health > 0 then
+                            targetMob = v
+                            break
+                        end
                     end
                 end
-            end
 
-            if targetMob then
-                _targetCF = CFrame.new(targetMob.HumanoidRootPart.Position.X, targetMob.HumanoidRootPart.Position.Y + _G.MobHoverHeight, targetMob.HumanoidRootPart.Position.Z)
-            else
-                _targetCF = CFrame.new(CFrameMon.X, CFrameMon.Y + _G.MobHoverHeight, CFrameMon.Z)
+                if targetMob then
+                    _targetCF = CFrame.new(targetMob.HumanoidRootPart.Position.X, targetMob.HumanoidRootPart.Position.Y + _G.MobHoverHeight, targetMob.HumanoidRootPart.Position.Z)
+                else
+                    _targetCF = CFrame.new(CFrameMon.X, CFrameMon.Y + _G.MobHoverHeight, CFrameMon.Z)
+                end
             end
         end)
     end
 end)
 
 -- ============================================================
--- MOVEMENT & NOCLIP LOOP (Heartbeat + CFrame trực tiếp)
+-- MOVEMENT & NOCLIP LOOP
 -- ============================================================
 RunService.Heartbeat:Connect(function(dt)
-    if not _G.AutoFarmLevel or not _targetCF then return end
+    if not (_G.AutoFarmLevel or _G.AutoFarmBoss) or not _targetCF then return end
 
     local char = LP.Character
     if not char then return end
     local hrp = char:FindFirstChild("HumanoidRootPart")
     if not hrp then return end
 
-    -- 1. Noclip (Xuyên vật cản)
+    -- Noclip xuyên vật cản
     for _, v in ipairs(char:GetDescendants()) do
         if v:IsA("BasePart") and v.CanCollide then
             v.CanCollide = false
         end
     end
 
-    -- 2. Di chuyển bằng CFrame (Bỏ qua vật lý)
+    -- Di chuyển CFrame (tốc độ giới hạn an toàn)
     local curPos = hrp.Position
     local targetPos = _targetCF.Position
     local delta = targetPos - curPos
     local dist = delta.Magnitude
 
     if dist > 2 then
-        -- Tính toán khoảng cách bay dựa vào tốc độ (studs/s)
         local moveDist = _G.FlySpeed * dt
         if moveDist > dist then moveDist = dist end
-        
         local dir = delta.Unit
         local newPos = curPos + dir * moveDist
-        
-        -- Gán CFrame, giữ Y cố định theo target
         hrp.CFrame = CFrame.new(Vector3.new(newPos.X, targetPos.Y, newPos.Z), Vector3.new(newPos.X, targetPos.Y, newPos.Z) + hrp.CFrame.LookVector)
     else
-        -- Đã tới đích, ghim chặt
         hrp.CFrame = CFrame.new(targetPos)
     end
 end)
@@ -562,56 +511,71 @@ end)
 -- ============================================================
 -- RAYFIELD UI CONFIG
 -- ============================================================
+-- FARM TAB
 FarmTab:CreateToggle({
    Name = "Auto Farm Level",
    CurrentValue = false,
    Flag = "AutoFarmLevel",
    Callback = function(Value)
        _G.AutoFarmLevel = Value
-       if not Value then _targetCF = nil end
+       if Value then _G.AutoFarmBoss = false end
    end,
 })
 
 FarmTab:CreateSlider({
-   Name = "Hover Height",
+   Name = "Hover Height (Mob)",
    Range = {3, 20},
    Increment = 1,
    Suffix = "studs",
    CurrentValue = 5,
    Flag = "MobHoverHeight",
-   Callback = function(Value)
-       _G.MobHoverHeight = Value
-   end,
+   Callback = function(Value) _G.MobHoverHeight = Value end,
 })
 
 FarmTab:CreateSlider({
-   Name = "Fly Speed (studs/s)",
+   Name = "Fly Speed",
    Range = {40, 150},
    Increment = 10,
    Suffix = "studs/s",
    CurrentValue = 80,
    Flag = "FlySpeed",
-   Callback = function(Value)
-       _G.FlySpeed = Value
-   end,
+   Callback = function(Value) _G.FlySpeed = Value end,
 })
 
 FarmTab:CreateToggle({
-   Name = "Gom Quái",
+   Name = "Gom Quái (Bring Mobs)",
    CurrentValue = false,
    Flag = "BringMobs",
-   Callback = function(Value)
-       _G.BringMobs = Value
+   Callback = function(Value) _G.BringMobs = Value end,
+})
+
+-- BOSS TAB
+BossTab:CreateDropdown({
+   Name = "Chọn Boss",
+   Options = {"The Gorilla King", "Bobby", "The Saw", "Yeti", "Mob Leader", "Vice Admiral", "Warden", "Chief Warden", "Swan", "Magma Admiral", "Fishman Lord", "Wysper", "Thunder God", "Cyborg", "Ice Admiral", "Greybeard"},
+   CurrentOption = {"The Gorilla King"},
+   Flag = "SelectBoss",
+   Callback = function(Option)
+       _G.SelectBoss = Option[1]
    end,
 })
 
+BossTab:CreateToggle({
+   Name = "Auto Farm Boss",
+   CurrentValue = false,
+   Flag = "AutoFarmBoss",
+   Callback = function(Value)
+       _G.AutoFarmBoss = Value
+       if Value then _G.AutoFarmLevel = false end
+   end,
+})
+
+-- SETTINGS TAB
 SettingsTab:CreateToggle({
    Name = "Auto Far Attack",
    CurrentValue = true,
    Flag = "AutoFarAttack",
-   Callback = function(Value)
-       _G.AutoFarAttack = Value
-   end,
+   Callback = function(Value) _G.AutoFarAttack = Value end,
 })
 
 SettingsTab:CreateSlider({
@@ -621,9 +585,7 @@ SettingsTab:CreateSlider({
    Suffix = "studs",
    CurrentValue = 60,
    Flag = "FarAttackRadius",
-   Callback = function(Value)
-       _G.FarAttackRadius = Value
-   end,
+   Callback = function(Value) _G.FarAttackRadius = Value end,
 })
 
 SettingsTab:CreateSlider({
@@ -633,9 +595,7 @@ SettingsTab:CreateSlider({
    Suffix = "s",
    CurrentValue = 0.05,
    Flag = "FarAttackDelay",
-   Callback = function(Value)
-       _G.FarAttackDelay = Value
-   end,
+   Callback = function(Value) _G.FarAttackDelay = Value end,
 })
 
 SettingsTab:CreateDropdown({
@@ -643,19 +603,15 @@ SettingsTab:CreateDropdown({
    Options = {"Melee", "Sword", "Blox Fruit", "Gun"},
    CurrentOption = {"Melee"},
    Flag = "WeaponType",
-   Callback = function(Option)
-       _G.WeaponType = Option[1]
-   end,
+   Callback = function(Option) _G.WeaponType = Option[1] end,
 })
 
 SettingsTab:CreateToggle({
    Name = "Use Bypass",
    CurrentValue = true,
    Flag = "UseBypass",
-   Callback = function(Value)
-       _G.UseBypass = Value
-   end,
+   Callback = function(Value) _G.UseBypass = Value end,
 })
 
 Rayfield:LoadConfiguration()
-print("[MANGO HUB] 🥭 V16 Fix Fly - Heartbeat CFrame & Noclip applied.")
+print("[MANGO HUB] 🥭 V25 Loaded. Boss Farm & Coordinates Fixed.")
