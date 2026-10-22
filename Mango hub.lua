@@ -1,5 +1,5 @@
 -- ============================================================
--- MANGO HUB 🥭 - V38 (Safe Fly to Mob)
+-- MANGO HUB 🥭 - V39 (Safe Tween Noclip)
 -- Yêu cầu executor: cloneref, bit32, sethiddenproperty
 -- ============================================================
 
@@ -64,8 +64,8 @@ local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
 local Window = Rayfield:CreateWindow({
    Name = "MANGO HUB 🥭",
-   LoadingTitle = "Mango Hub",
-   LoadingSubtitle = "by Minh hub",
+   LoadingTitle = "Mango Hub V39",
+   LoadingSubtitle = "by AI",
    ConfigurationSaving = { Enabled = false },
    KeySystem = false,
 })
@@ -149,7 +149,7 @@ local function AutoHaki()
     end
 end
 
--- BKP: TELEPORT TỨC THỜI (Dùng để về NPC)
+-- BKP: TELEPORT TỨC THỜI (Dùng cho NPC)
 local function BKP(cf)
     local char = LP.Character
     if not char then return end
@@ -162,7 +162,7 @@ local function BKP(cf)
     end)
 end
 
--- SAFE FLY: Bay mượt bằng TweenService (Dùng để bay tới quái)
+-- SAFE FLY: Bay mượt bằng TweenService (Dùng cho Quái)
 local function SafeFly(targetCF)
     if not targetCF then return end
     local char = LP.Character
@@ -408,7 +408,7 @@ task.spawn(function()
 end)
 
 -- ============================================================
--- FARM LOOP (Safe Fly to Mob)
+-- FARM LOOP (Safe Fly to Mob + BKP to NPC)
 -- ============================================================
 task.spawn(function()
     while task.wait(0.5) do
@@ -480,11 +480,12 @@ task.spawn(function()
 
                 if _isStartingQuest then questVisible = true end
 
-                -- Chưa có Quest -> BKP tới NPC (Nhanh)
+                -- Chưa có Quest -> Tới NPC
                 if not questVisible then
                     local distToNPC = (hrp.Position - CFrameQ.Position).Magnitude
                     local xzDist = (Vector2.new(hrp.Position.X, hrp.Position.Z) - Vector2.new(CFrameQ.X, CFrameQ.Z)).Magnitude
                     
+                    -- Dùng BKP cho NPC
                     if distToNPC > 15 then
                         BKP(CFrameQ)
                     end
@@ -503,7 +504,7 @@ task.spawn(function()
                     return
                 end
 
-                -- Đã có Quest -> SafeFly tới quái (Mượt)
+                -- Đã có Quest -> SafeFly tới quái
                 local enemies = Workspace:FindFirstChild("Enemies")
                 local targetMob, nearestDist = nil, math.huge
                 if enemies then
@@ -530,6 +531,20 @@ task.spawn(function()
                 end
             end
         end)
+    end
+end)
+
+-- ============================================================
+-- NOCLIP LOOP (Bay xuyên tường)
+-- ============================================================
+RunService.Stepped:Connect(function()
+    if not (_G.AutoFarmLevel or _G.AutoFarmBoss) then return end
+    local char = LP.Character
+    if not char then return end
+    for _, v in ipairs(char:GetDescendants()) do
+        if v:IsA("BasePart") and v.CanCollide then
+            v.CanCollide = false
+        end
     end
 end)
 
@@ -672,4 +687,4 @@ SettingsTab:CreateToggle({
 })
 
 Rayfield:LoadConfiguration()
-print("[MANGO HUB] 🥭 V38 Loaded. Safe Fly to Mob.")
+print("[MANGO HUB] 🥭 V39 Loaded. Safe Tween Noclip.")
