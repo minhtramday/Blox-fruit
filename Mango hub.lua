@@ -1,5 +1,5 @@
 -- ============================================================
--- MANGO HUB 🥭 - V32 (Anti Ping-pong Teleport)
+-- MANGO HUB 🥭 - V33 (Full Code Integration - No PingPong)
 -- Yêu cầu executor: cloneref, bit32, sethiddenproperty
 -- ============================================================
 
@@ -62,7 +62,7 @@ local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
 local Window = Rayfield:CreateWindow({
    Name = "MANGO HUB 🥭",
-   LoadingTitle = "Mango Hub V32",
+   LoadingTitle = "Mango Hub V33",
    LoadingSubtitle = "by AI",
    ConfigurationSaving = { Enabled = false },
    KeySystem = false,
@@ -147,7 +147,7 @@ local function AutoHaki()
     end
 end
 
--- BKP: TELEPORT TỨC THỜI
+-- BKP: TELEPORT TỨC THỜI (Lấy từ hdanhhub)
 local function BKP(cf)
     local char = LP.Character
     if not char then return end
@@ -386,10 +386,10 @@ task.spawn(function()
 end)
 
 -- ============================================================
--- FARM LOOP (Anti Ping-pong)
+-- FARM LOOP (Full Code Integration)
 -- ============================================================
 task.spawn(function()
-    while task.wait(0.5) do -- Tăng delay để tránh spam ping-pong
+    while task.wait(0.1) do
         if not (_G.AutoFarmLevel or _G.AutoFarmBoss) then
             _isStartingQuest = false
             _questActive = false
@@ -419,11 +419,17 @@ task.spawn(function()
                 end
 
                 if targetBoss then
-                    BKP(CFrame.new(targetBoss.HumanoidRootPart.Position.X, targetBoss.HumanoidRootPart.Position.Y + _G.MobHoverHeight, targetBoss.HumanoidRootPart.Position.Z))
+                    local dist = (hrp.Position - targetBoss.HumanoidRootPart.Position).Magnitude
+                    if dist > 10 then
+                        BKP(CFrame.new(targetBoss.HumanoidRootPart.Position.X, targetBoss.HumanoidRootPart.Position.Y + _G.MobHoverHeight, targetBoss.HumanoidRootPart.Position.Z))
+                    end
                 else
                     local spawnCF = BossData[bossName]
                     if spawnCF then
-                        BKP(CFrame.new(spawnCF.X, spawnCF.Y + _G.MobHoverHeight, spawnCF.Z))
+                        local dist = (hrp.Position - spawnCF.Position).Magnitude
+                        if dist > 10 then
+                            BKP(CFrame.new(spawnCF.X, spawnCF.Y + _G.MobHoverHeight, spawnCF.Z))
+                        end
                     end
                 end
                 return
@@ -490,8 +496,8 @@ task.spawn(function()
                 end
 
                 if targetMob then
-                    -- Nếu khoảng cách tới quái > 15 studs mới BKP
-                    if nearestDist > 15 then
+                    -- Nếu khoảng cách tới quái > 10 studs mới BKP
+                    if nearestDist > 10 then
                         BKP(CFrame.new(targetMob.HumanoidRootPart.Position.X, targetMob.HumanoidRootPart.Position.Y + _G.MobHoverHeight, targetMob.HumanoidRootPart.Position.Z))
                     end
                 else
@@ -624,4 +630,4 @@ SettingsTab:CreateToggle({
 })
 
 Rayfield:LoadConfiguration()
-print("[MANGO HUB] 🥭 V32 Loaded. Anti Ping-pong applied.")
+print("[MANGO HUB] 🥭 V33 Loaded. Full Code Integration.")
