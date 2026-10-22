@@ -1,5 +1,5 @@
 -- ============================================================
--- MANGO HUB 🥭 - V30 (Quest Lag Protection)
+-- MANGO HUB 🥭 - V31 (Original Teleport Method - No Lag, No Snapback)
 -- Yêu cầu executor: cloneref, bit32, sethiddenproperty
 -- ============================================================
 
@@ -26,15 +26,14 @@ _G.FarAttackDelay  = 0.05
 _G.WeaponType      = "Melee"
 _G.UseBypass       = true
 _G.MobHoverHeight  = 5
-_G.NPCHoverOffset  = 0
-_G.FlySpeed        = 60
+_G.NPCHoverOffset  = 3
 _G.BringMobs       = false
 
 -- State
 local _targetCF = nil
 local _isStartingQuest = false
-local _questActive = false      -- Cờ xác nhận đang trong thời gian chờ Quest
-local _questGraceTime = 0       -- Mốc thời gian bắt đầu chờ
+local _questActive = false
+local _questGraceTime = 0
 local Mon, NameMon, NameQuest, QuestLv, CFrameQ, CFrameMon
 
 -- Boss Data
@@ -64,7 +63,7 @@ local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
 local Window = Rayfield:CreateWindow({
    Name = "MANGO HUB 🥭",
-   LoadingTitle = "Mango Hub V30",
+   LoadingTitle = "Mango Hub V31",
    LoadingSubtitle = "by AI",
    ConfigurationSaving = { Enabled = false },
    KeySystem = false,
@@ -147,6 +146,21 @@ local function AutoHaki()
     if char and not char:FindFirstChild("HasBuso") then
         pcall(function() ReplicatedStorage.Remotes.CommF_:InvokeServer("Buso") end)
     end
+end
+
+-- ============================================================
+-- BKP: TELEPORT TỨC THỜI (Lấy từ hdanhhub)
+-- ============================================================
+local function BKP(cf)
+    local char = LP.Character
+    if not char then return end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+    pcall(function()
+        hrp.CFrame = cf
+        task.wait()
+        hrp.CFrame = cf
+    end)
 end
 
 -- ============================================================
@@ -375,12 +389,11 @@ task.spawn(function()
 end)
 
 -- ============================================================
--- FARM LOOP (Đã thêm Grace Period 3 giây chống lag Quest)
+-- FARM LOOP (Dùng BKP Teleport + Grace Period chống lag Quest)
 -- ============================================================
 task.spawn(function()
-    while task.wait(0.1) do
+    while task.wait() do
         if not (_G.AutoFarmLevel or _G.AutoFarmBoss) then
-            _targetCF = nil
             _isStartingQuest = false
             _questActive = false
             continue
@@ -409,13 +422,14 @@ task.spawn(function()
                 end
 
                 if targetBoss then
-                    _targetCF = CFrame.new(targetBoss.HumanoidRootPart.Position.X, targetBoss.HumanoidRootPart.Position.Y + _G.MobHoverHeight, targetBoss.HumanoidRootPart.Position.Z)
+                    BKP(CFrame.new(targetBoss.HumanoidRootPart.Position.X, targetBoss.HumanoidRootPart.Position.Y + _G.MobHoverHeight, targetBoss.HumanoidRootPart.Position.Z))
                 else
                     local spawnCF = BossData[bossName]
                     if spawnCF then
-                        _targetCF = CFrame.new(spawnCF.X, spawnCF.Y + _G.MobHoverHeight, spawnCF.Z)
+                        BKP(CFrame.new(spawnCF.X, spawnCF.Y + _G.MobHoverHeight, spawnCF.Z))
                     end
                 end
+                task.wait(0.1)
                 return
             end
 
@@ -429,39 +443,35 @@ task.spawn(function()
                     questVisible = LP.PlayerGui.Main.Quest.Visible
                 end)
 
-                -- BẢO VỆ QUEST KHỎI LAG (Grace Period)
                 if _questActive then
                     if questVisible then
-                        -- Nếu đã thấy Quest thật -> Tắt cờ chờ
                         _questActive = false
                     elseif (tick() - _questGraceTime) < 3 then
-                        -- Nếu chưa thấy Quest nhưng chưa hết 3s -> Giả vờ như đã có Quest
                         questVisible = true
                     else
-                        -- Hết 3s mà vẫn không thấy Quest -> Hủy cờ, quay về NPC
                         _questActive = false
                     end
                 end
 
                 if _isStartingQuest then questVisible = true end
 
-                -- Chưa có Quest -> Tới NPC
+                -- Chưa có Quest -> Teleport tới NPC
                 if not questVisible then
-                    _targetCF = CFrameQ * CFrame.new(0, _G.NPCHoverOffset, 0)
+                    BKP(CFrameQ * CFrame.new(0, _G.NPCHoverOffset, 0))
                     
                     local xzDist = (Vector2.new(hrp.Position.X, hrp.Position.Z) - Vector2.new(CFrameQ.X, CFrameQ.Z)).Magnitude
                     if xzDist < 15 and not _isStartingQuest then
                         _isStartingQuest = true
-                        -- Kích hoạt Grace Period
                         _questActive = true
                         _questGraceTime = tick()
                         ReplicatedStorage.Remotes.CommF_:InvokeServer("StartQuest", NameQuest, QuestLv)
                         task.delay(2, function() _isStartingQuest = false end)
                     end
+                    task.wait(0.1)
                     return
                 end
 
-                -- Đã có Quest -> Tìm quái (Lọc chính xác + sắp xếp gần nhất)
+                -- Đã có Quest -> Tìm quái gần nhất và Teleport tới
                 local enemies = Workspace:FindFirstChild("Enemies")
                 local targetMob, nearestDist = nil, math.huge
                 if enemies then
@@ -480,78 +490,44 @@ task.spawn(function()
                 end
 
                 if targetMob then
-                    _targetCF = CFrame.new(targetMob.HumanoidRootPart.Position.X, targetMob.HumanoidRootPart.Position.Y + _G.MobHoverHeight, targetMob.HumanoidRootPart.Position.Z)
+                    BKP(CFrame.new(targetMob.HumanoidRootPart.Position.X, targetMob.HumanoidRootPart.Position.Y + _G.MobHoverHeight, targetMob.HumanoidRootPart.Position.Z))
                 else
-                    _targetCF = CFrame.new(CFrameMon.X, CFrameMon.Y + _G.MobHoverHeight, CFrameMon.Z)
+                    BKP(CFrame.new(CFrameMon.X, CFrameMon.Y + _G.MobHoverHeight, CFrameMon.Z))
                 end
+                task.wait(0.1)
             end
         end)
     end
 end)
 
 -- ============================================================
--- MOVEMENT LOOP (Orbit Fly + Frame Cap)
+-- BODY CLIP (Chống Snapback - Lấy từ hdanhhub)
 -- ============================================================
-RunService.Heartbeat:Connect(function(dt)
-    if not (_G.AutoFarmLevel or _G.AutoFarmBoss) then return end
-
-    local char = LP.Character
-    if not char then return end
-    local hrp = char:FindFirstChild("HumanoidRootPart")
-    if not hrp then return end
-
-    -- Noclip
-    for _, v in ipairs(char:GetDescendants()) do
-        if v:IsA("BasePart") and v.CanCollide then
-            v.CanCollide = false
-        end
-    end
-
-    if not _targetCF then return end
-
-    local curPos = hrp.Position
-    local targetPos = _targetCF.Position
-    local delta = targetPos - curPos
-    local horizDelta = Vector3.new(delta.X, 0, delta.Z)
-    local horizDist = horizDelta.Magnitude
-
-    -- GIỚI HẠN TỐC ĐỘ MỖI FRAME (Chống snapback do lag)
-    local maxStep = 5 -- Tối đa 5 studs/frame
-    local speed = math.min(_G.FlySpeed * dt, maxStep)
-
-    if horizDist > 3 then
-        -- Nếu xa quá (> 500 studs) thì dùng Map Teleport
-        if horizDist > 500 and game.PlaceId == 2753915549 then
-            if targetPos.Z < -1000 and curPos.Z > 0 then
-                ReplicatedStorage.Remotes.CommF_:InvokeServer("requestEntrance", Vector3.new(-4607.82275, 872.54248, -1667.55688))
-            elseif targetPos.Y > 700 then
-                ReplicatedStorage.Remotes.CommF_:InvokeServer("requestEntrance", Vector3.new(-7894.6176757813, 5547.1416015625, -380.29119873047))
+task.spawn(function()
+    while task.wait() do
+        pcall(function()
+            if _G.AutoFarmLevel or _G.AutoFarmBoss then
+                local char = LP.Character
+                if char then
+                    local hrp = char:FindFirstChild("HumanoidRootPart")
+                    if hrp and not hrp:FindFirstChild("BodyClip") then
+                        local bv = Instance.new("BodyVelocity")
+                        bv.Name = "BodyClip"
+                        bv.MaxForce = Vector3.new(100000, 100000, 100000)
+                        bv.Velocity = Vector3.new(0, 0, 0)
+                        bv.Parent = hrp
+                    end
+                end
+            else
+                local char = LP.Character
+                if char then
+                    local hrp = char:FindFirstChild("HumanoidRootPart")
+                    if hrp and hrp:FindFirstChild("BodyClip") then
+                        hrp.BodyClip:Destroy()
+                    end
+                end
             end
-        end
-
-        -- Bay vòng lên trời (Orbit Fly) để tránh vật cản
-        local orbitY = math.max(curPos.Y, targetPos.Y) + 50
-        local moveDir = horizDelta.Unit
-        
-        -- Bay ngang
-        local newXZ = curPos + moveDir * speed
-        
-        -- Bay lên trời nếu chưa đủ cao (chỉ khi ở xa)
-        local currentY = curPos.Y
-        if horizDist > 20 and currentY < orbitY - 10 then
-            currentY = currentY + speed
-        end
-        
-        hrp.CFrame = CFrame.lookAt(Vector3.new(newXZ.X, currentY, newXZ.Z), Vector3.new(newXZ.X, currentY, newXZ.Z) + moveDir)
-    else
-        -- Đã ở trên đầu target -> Hạ cánh (thang máy)
-        local vertDist = targetPos.Y - curPos.Y
-        if math.abs(vertDist) > 1 then
-            local moveY = math.sign(vertDist) * math.min(speed, math.abs(vertDist))
-            hrp.CFrame = CFrame.new(curPos.X, curPos.Y + moveY, curPos.Z) * hrp.CFrame.Rotation
-        else
-            hrp.CFrame = CFrame.new(targetPos) * hrp.CFrame.Rotation
-        end
+        end)
     end
 end)
 
@@ -576,16 +552,6 @@ FarmTab:CreateSlider({
    CurrentValue = 5,
    Flag = "MobHoverHeight",
    Callback = function(Value) _G.MobHoverHeight = Value end,
-})
-
-FarmTab:CreateSlider({
-   Name = "Fly Speed",
-   Range = {40, 120},
-   Increment = 10,
-   Suffix = "studs/s",
-   CurrentValue = 60,
-   Flag = "FlySpeed",
-   Callback = function(Value) _G.FlySpeed = Value end,
 })
 
 FarmTab:CreateToggle({
@@ -656,4 +622,4 @@ SettingsTab:CreateToggle({
 })
 
 Rayfield:LoadConfiguration()
-print("[MANGO HUB] 🥭 V30 Loaded. Quest Lag Protection (Grace Period).")
+print("[MANGO HUB] 🥭 V31 Loaded. Original Teleport Method (BKP + BodyClip).")
