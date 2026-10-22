@@ -1,5 +1,5 @@
 -- ============================================================
--- MANGO HUB 🥭 - V28 (No Vertical Snapback + Exact Mob Filter)
+-- MANGO HUB 🥭 - V29 (World Origin TP + Orbit Fly)
 -- Yêu cầu executor: cloneref, bit32, sethiddenproperty
 -- ============================================================
 
@@ -27,7 +27,7 @@ _G.WeaponType      = "Melee"
 _G.UseBypass       = true
 _G.MobHoverHeight  = 5
 _G.NPCHoverOffset  = 0
-_G.FlySpeed        = 80
+_G.FlySpeed        = 60     -- Giảm tốc độ để chống snapback
 _G.BringMobs       = false
 
 -- State
@@ -61,7 +61,7 @@ local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
 local Window = Rayfield:CreateWindow({
    Name = "MANGO HUB 🥭",
-   LoadingTitle = "Mango Hub V28",
+   LoadingTitle = "Mango Hub V29",
    LoadingSubtitle = "by AI",
    ConfigurationSaving = { Enabled = false },
    KeySystem = false,
@@ -147,7 +147,7 @@ local function AutoHaki()
 end
 
 -- ============================================================
--- CHECK LEVEL (Đã cập nhật Y chuẩn)
+-- CHECK LEVEL
 -- ============================================================
 function CheckLevel()
     local lvl = LP.Data.Level.Value
@@ -372,7 +372,7 @@ task.spawn(function()
 end)
 
 -- ============================================================
--- FARM LOOP (ĐÃ SỬA: Lọc chính xác, sắp xếp khoảng cách)
+-- FARM LOOP
 -- ============================================================
 task.spawn(function()
     while task.wait(0.1) do
@@ -469,7 +469,7 @@ task.spawn(function()
 end)
 
 -- ============================================================
--- MOVEMENT LOOP (Không ép Y khi bay ngang, chỉ hạ Y khi tới nơi)
+-- MOVEMENT LOOP (Orbit Fly + Frame Cap)
 -- ============================================================
 RunService.Heartbeat:Connect(function(dt)
     if not (_G.AutoFarmLevel or _G.AutoFarmBoss) then return end
@@ -494,22 +494,41 @@ RunService.Heartbeat:Connect(function(dt)
     local horizDelta = Vector3.new(delta.X, 0, delta.Z)
     local horizDist = horizDelta.Magnitude
 
+    -- GIỚI HẠN TỐC ĐỘ MỖI FRAME (Chống snapback do lag)
+    local maxStep = 5 -- Tối đa 5 studs/frame
+    local speed = math.min(_G.FlySpeed * dt, maxStep)
+
     if horizDist > 3 then
-        -- Bay ngang bằng Y hiện tại (không bị snapback)
-        local moveDist = math.min(_G.FlySpeed * dt, horizDist)
-        local newXZ = curPos + horizDelta.Unit * moveDist
+        -- Nếu xa quá (> 500 studs) thì dùng Map Teleport
+        if horizDist > 500 and game.PlaceId == 2753915549 then
+            if targetPos.Z < -1000 and curPos.Z > 0 then
+                ReplicatedStorage.Remotes.CommF_:InvokeServer("requestEntrance", Vector3.new(-4607.82275, 872.54248, -1667.55688))
+            elseif targetPos.Y > 700 then
+                ReplicatedStorage.Remotes.CommF_:InvokeServer("requestEntrance", Vector3.new(-7894.6176757813, 5547.1416015625, -380.29119873047))
+            end
+        end
+
+        -- Bay vòng lên trời (Orbit Fly) để tránh vật cản
+        local orbitY = math.max(curPos.Y, targetPos.Y) + 50
+        local moveDir = horizDelta.Unit
         
-        -- Giữ nguyên Y hiện tại
-        hrp.CFrame = CFrame.lookAt(Vector3.new(newXZ.X, curPos.Y, newXZ.Z), Vector3.new(newXZ.X, curPos.Y, newXZ.Z) + horizDelta.Unit)
+        -- Bay ngang
+        local newXZ = curPos + moveDir * speed
+        
+        -- Bay lên trời nếu chưa đủ cao (chỉ khi ở xa)
+        local currentY = curPos.Y
+        if horizDist > 20 and currentY < orbitY - 10 then
+            currentY = currentY + speed
+        end
+        
+        hrp.CFrame = CFrame.lookAt(Vector3.new(newXZ.X, currentY, newXZ.Z), Vector3.new(newXZ.X, currentY, newXZ.Z) + moveDir)
     else
-        -- Đã ở ngay trên đầu target -> Hạ Y từ từ (giống thang máy)
+        -- Đã ở trên đầu target -> Hạ cánh (thang máy)
         local vertDist = targetPos.Y - curPos.Y
         if math.abs(vertDist) > 1 then
-            local moveY = math.sign(vertDist) * math.min(_G.FlySpeed * dt, math.abs(vertDist))
-            local newY = curPos.Y + moveY
-            hrp.CFrame = CFrame.new(curPos.X, newY, curPos.Z) * hrp.CFrame.Rotation
+            local moveY = math.sign(vertDist) * math.min(speed, math.abs(vertDist))
+            hrp.CFrame = CFrame.new(curPos.X, curPos.Y + moveY, curPos.Z) * hrp.CFrame.Rotation
         else
-            -- Đã tới đích hoàn toàn
             hrp.CFrame = CFrame.new(targetPos) * hrp.CFrame.Rotation
         end
     end
@@ -543,7 +562,7 @@ FarmTab:CreateSlider({
    Range = {40, 120},
    Increment = 10,
    Suffix = "studs/s",
-   CurrentValue = 80,
+   CurrentValue = 60,
    Flag = "FlySpeed",
    Callback = function(Value) _G.FlySpeed = Value end,
 })
@@ -566,54 +585,4 @@ BossTab:CreateDropdown({
 BossTab:CreateToggle({
    Name = "Auto Farm Boss",
    CurrentValue = false,
-   Flag = "AutoFarmBoss",
-   Callback = function(Value)
-       _G.AutoFarmBoss = Value
-       if Value then _G.AutoFarmLevel = false end
-   end,
-})
-
-SettingsTab:CreateToggle({
-   Name = "Auto Far Attack",
-   CurrentValue = true,
-   Flag = "AutoFarAttack",
-   Callback = function(Value) _G.AutoFarAttack = Value end,
-})
-
-SettingsTab:CreateSlider({
-   Name = "Attack Radius",
-   Range = {20, 200},
-   Increment = 5,
-   Suffix = "studs",
-   CurrentValue = 60,
-   Flag = "FarAttackRadius",
-   Callback = function(Value) _G.FarAttackRadius = Value end,
-})
-
-SettingsTab:CreateSlider({
-   Name = "Attack Delay",
-   Range = {0.01, 1},
-   Increment = 0.01,
-   Suffix = "s",
-   CurrentValue = 0.05,
-   Flag = "FarAttackDelay",
-   Callback = function(Value) _G.FarAttackDelay = Value end,
-})
-
-SettingsTab:CreateDropdown({
-   Name = "Weapon Type",
-   Options = {"Melee", "Sword", "Blox Fruit", "Gun"},
-   CurrentOption = {"Melee"},
-   Flag = "WeaponType",
-   Callback = function(Option) _G.WeaponType = Option[1] end,
-})
-
-SettingsTab:CreateToggle({
-   Name = "Use Bypass",
-   CurrentValue = true,
-   Flag = "UseBypass",
-   Callback = function(Value) _G.UseBypass = Value end,
-})
-
-Rayfield:LoadConfiguration()
-print("[MANGO HUB] 🥭 V28 Loaded. No Vertical Snapback + Exact Mob Filter.")
+   Flag = "
