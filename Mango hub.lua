@@ -1,5 +1,5 @@
 -- ============================================================
--- MANGO HUB 🥭 - V50 (Pure Server-Side Farm)
+-- MANGO HUB 🥭 - V51 (Server-Side Quest Progress Fix + Bring Mobs)
 -- By Minh Hub
 -- Yêu cầu executor: cloneref, bit32, sethiddenproperty
 -- ============================================================
@@ -28,11 +28,14 @@ _G.TocDoDanh      = 0.05
 _G.LoaiVuKhi      = "Melee"
 _G.DungBypass     = true
 _G.DoCaoLoLung    = 5
-_G.GomQuai        = false
+_G.GomQuai        = true    -- Bật mặc định để đánh nhanh
+_G.KhoangCachGom  = 100
 
 -- Biến trạng thái
 local _lastQuestTime = 0
+local _questSent = false      -- Cờ chặn gửi StartQuest liên tục
 local Mon, NameMon, NameQuest, QuestLv
+local _farmPos = nil
 
 -- Dữ liệu Boss
 local BossData = {
@@ -160,7 +163,7 @@ local function BKP(cf)
 end
 
 -- ============================================================
--- CHECK LEVEL (Chỉ lấy tên quái & quest, không toạ độ)
+-- CHECK LEVEL
 -- ============================================================
 function CheckLevel()
     local lvl = LP.Data.Level.Value
@@ -297,7 +300,7 @@ local function fireHit(head, list)
 end
 
 -- ============================================================
--- VÒNG LẶP ĐÁNH (LUÔN BẬT)
+-- VÒNG LẶP ĐÁNH
 -- ============================================================
 task.spawn(function()
     while task.wait(_G.TocDoDanh) do
@@ -315,6 +318,7 @@ task.spawn(function()
         local list, head = scanTargets(_G.BanKinhDanh)
         if #list == 0 then continue end
 
+        -- Gom quái (Bring Mobs)
         if _G.GomQuai then
             local hrp = char:FindFirstChild("HumanoidRootPart")
             if hrp then
@@ -344,7 +348,7 @@ task.spawn(function()
 end)
 
 -- ============================================================
--- VÒNG LẶP CÀY CẤP / BOSS (Server-Side)
+-- VÒNG LẶP CÀY CẤP / BOSS (Fix Quest Progress)
 -- ============================================================
 task.spawn(function()
     while task.wait(0.1) do
@@ -357,6 +361,7 @@ task.spawn(function()
                     hrp.BodyClip:Destroy()
                 end
             end
+            _questSent = false
             continue
         end
 
@@ -400,6 +405,7 @@ task.spawn(function()
 
                 if targetBoss then
                     BKP(CFrame.new(targetBoss.HumanoidRootPart.Position.X, targetBoss.HumanoidRootPart.Position.Y + _G.DoCaoLoLung, targetBoss.HumanoidRootPart.Position.Z))
+                    _farmPos = targetBoss.HumanoidRootPart.CFrame
                 else
                     local spawnCF = BossData[bossName]
                     if spawnCF then
@@ -414,10 +420,22 @@ task.spawn(function()
                 CheckLevel()
                 if not Mon then return end
 
-                -- Nhận Quest từ xa (Gửi mỗi 1s)
-                if tick() - _lastQuestTime > 1 then
-                    _lastQuestTime = tick()
+                -- Kiểm tra Quest hiện tại
+                local questVisible = false
+                pcall(function()
+                    questVisible = LP.PlayerGui.Main.Quest.Visible
+                end)
+
+                -- CHỈ gửi StartQuest 1 LẦN nếu chưa có Quest
+                if not questVisible and not _questSent then
+                    _questSent = true
                     CommF:InvokeServer("StartQuest", NameQuest, QuestLv)
+                    task.delay(2, function() _questSent = false end)
+                end
+
+                -- Nếu đã có Quest thì KHÔNG gửi StartQuest nữa (tránh reset progress)
+                if questVisible then
+                    _questSent = false
                 end
 
                 -- Tìm quái trong Workspace
@@ -436,10 +454,14 @@ task.spawn(function()
                 end
 
                 if targetMob then
-                    -- BKP tới quái
-                    BKP(CFrame.new(targetMob.HumanoidRootPart.Position.X, targetMob.HumanoidRootPart.Position.Y + _G.DoCaoLoLung, targetMob.HumanoidRootPart.Position.Z))
+                    -- Nếu quái ở xa (ngoài bán kính 15), BKP tới gần
+                    local dist = (targetMob.HumanoidRootPart.Position - hrp.Position).Magnitude
+                    if dist > 15 then
+                        BKP(CFrame.new(targetMob.HumanoidRootPart.Position.X, targetMob.HumanoidRootPart.Position.Y + _G.DoCaoLoLung, targetMob.HumanoidRootPart.Position.Z))
+                    end
+                    -- Nếu đã ở gần, đứng yên đánh (GomQuai sẽ kéo quái về)
+                    _farmPos = targetMob.HumanoidRootPart.CFrame
                 end
-                -- Nếu không thấy quái, đứng im tại chỗ chờ
             end
         end)
     end
@@ -455,6 +477,7 @@ TabCayCap:CreateToggle({
    Callback = function(Value)
        _G.TuDongCayCap = Value
        if Value then _G.TuDongDanhBoss = false end
+       _questSent = false
    end,
 })
 
@@ -470,7 +493,7 @@ TabCayCap:CreateSlider({
 
 TabCayCap:CreateToggle({
    Name = "Gom Quái",
-   CurrentValue = false,
+   CurrentValue = true,
    Flag = "GomQuai",
    Callback = function(Value) _G.GomQuai = Value end,
 })
