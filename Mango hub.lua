@@ -1,5 +1,6 @@
 -- ============================================================
--- MANGO HUB 🥭 - V40 (No Quest Check Teleport + SafeFly)
+-- MANGO HUB 🥭 - Latest Version (Fixed Teleport Logic)
+-- By Minh Hub
 -- Yêu cầu executor: cloneref, bit32, sethiddenproperty
 -- ============================================================
 
@@ -64,8 +65,8 @@ local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
 local Window = Rayfield:CreateWindow({
    Name = "MANGO HUB 🥭",
-   LoadingTitle = "Mango Hub V40",
-   LoadingSubtitle = "by AI",
+   LoadingTitle = "Mango Hub",
+   LoadingSubtitle = "By Minh Hub",
    ConfigurationSaving = { Enabled = false },
    KeySystem = false,
 })
@@ -149,20 +150,7 @@ local function AutoHaki()
     end
 end
 
--- BKP: TELEPORT TỨC THỜI (Dùng cho NPC)
-local function BKP(cf)
-    local char = LP.Character
-    if not char then return end
-    local hrp = char:FindFirstChild("HumanoidRootPart")
-    if not hrp then return end
-    pcall(function()
-        hrp.CFrame = cf
-        task.wait()
-        hrp.CFrame = cf
-    end)
-end
-
--- SAFE FLY: Bay mượt bằng TweenService (Dùng cho Quái)
+-- SAFE FLY: Bay mượt bằng TweenService (Dùng cho tất cả)
 local function SafeFly(targetCF)
     if not targetCF then return end
     local char = LP.Character
@@ -192,7 +180,7 @@ local function SafeFly(targetCF)
 end
 
 -- ============================================================
--- CHECK LEVEL (Tọa độ NPC chuẩn)
+-- CHECK LEVEL
 -- ============================================================
 function CheckLevel()
     local lvl = LP.Data.Level.Value
@@ -408,7 +396,7 @@ task.spawn(function()
 end)
 
 -- ============================================================
--- FARM LOOP (Safe Fly to Mob + BKP to NPC)
+-- FARM LOOP (SafeFly toàn bộ, không BKP)
 -- ============================================================
 task.spawn(function()
     while task.wait(0.5) do
@@ -480,14 +468,13 @@ task.spawn(function()
 
                 if _isStartingQuest then questVisible = true end
 
-                -- Chưa có Quest -> Tới NPC
+                -- Chưa có Quest -> SafeFly tới NPC
                 if not questVisible then
                     local distToNPC = (hrp.Position - CFrameQ.Position).Magnitude
                     local xzDist = (Vector2.new(hrp.Position.X, hrp.Position.Z) - Vector2.new(CFrameQ.X, CFrameQ.Z)).Magnitude
                     
-                    -- Dùng BKP cho NPC
                     if distToNPC > 15 then
-                        BKP(CFrameQ)
+                        SafeFly(CFrameQ)
                     end
                     
                     if xzDist < 15 and not _isStartingQuest then
@@ -687,4 +674,4 @@ SettingsTab:CreateToggle({
 })
 
 Rayfield:LoadConfiguration()
-print("[MANGO HUB] 🥭 V40 Loaded. No Quest Check Teleport + SafeFly.")
+print("[MANGO HUB] 🥭 Loaded. By Minh Hub.")
