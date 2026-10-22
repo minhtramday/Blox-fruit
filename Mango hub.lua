@@ -1,6 +1,7 @@
 -- ============================================================
--- MANGO HUB 🥭 - V26 (Anti Snapback + Fix Quest Logic)
+-- MANGO HUB 🥭 - V27 (True Physics Noclip + Lag-free Quest)
 -- Yêu cầu executor: cloneref, bit32, sethiddenproperty
+-- Đã sửa: Dùng CFrame + HumanoidState.Physics để xuyên mọi vật cản.
 -- ============================================================
 
 local Players           = game:GetService("Players")
@@ -35,9 +36,6 @@ local _targetCF = nil
 local _isStartingQuest = false
 local Mon, NameMon, NameQuest, QuestLv, CFrameQ, CFrameMon
 
--- Movers
-local bp, bv
-
 -- Boss Data (Sea 1)
 local BossData = {
     ["The Gorilla King"] = CFrame.new(-1088.75, 8.13, -488.55),
@@ -65,7 +63,7 @@ local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
 local Window = Rayfield:CreateWindow({
    Name = "MANGO HUB 🥭",
-   LoadingTitle = "Mango Hub V26",
+   LoadingTitle = "Mango Hub V27",
    LoadingSubtitle = "by AI",
    ConfigurationSaving = { Enabled = false },
    KeySystem = false,
@@ -378,7 +376,7 @@ task.spawn(function()
 end)
 
 -- ============================================================
--- FARM LOOP (Kiểm tra Quest đơn giản)
+-- FARM LOOP
 -- ============================================================
 task.spawn(function()
     while task.wait(0.1) do
@@ -433,7 +431,7 @@ task.spawn(function()
 
                 if _isStartingQuest then questVisible = true end
 
-                -- Nếu chưa có quest -> Tới NPC
+                -- Chưa có Quest -> Tới NPC
                 if not questVisible then
                     _targetCF = CFrameQ * CFrame.new(0, _G.NPCHoverOffset, 0)
                     
@@ -446,7 +444,7 @@ task.spawn(function()
                     return
                 end
 
-                -- Nếu đã có quest -> Tìm quái
+                -- Đã có Quest -> Tìm quái
                 local targetMob = nil
                 local enemies = Workspace:FindFirstChild("Enemies")
                 if enemies then
@@ -469,21 +467,21 @@ task.spawn(function()
 end)
 
 -- ============================================================
--- MOVEMENT LOOP (BodyVelocity + BodyPosition chống snapback)
+-- MOVEMENT LOOP (CFrame + Humanoid.Physics)
 -- ============================================================
 RunService.Heartbeat:Connect(function(dt)
-    if not (_G.AutoFarmLevel or _G.AutoFarmBoss) then
-        if bp then bp:Destroy(); bp = nil end
-        if bv then bv:Destroy(); bv = nil end
-        return
-    end
+    if not (_G.AutoFarmLevel or _G.AutoFarmBoss) then return end
 
     local char = LP.Character
     if not char then return end
     local hrp = char:FindFirstChild("HumanoidRootPart")
-    if not hrp then return end
+    local hum = char:FindFirstChild("Humanoid")
+    if not hrp or not hum then return end
 
-    -- Bật Noclip để bay xuyên tường
+    -- Ép Humanoid sang trạng thái Physics để bỏ qua va chạm vật lý
+    hum:ChangeState(Enum.HumanoidStateType.Physics)
+
+    -- Bật Noclip liên tục
     for _, v in ipairs(char:GetDescendants()) do
         if v:IsA("BasePart") and v.CanCollide then
             v.CanCollide = false
@@ -492,35 +490,20 @@ RunService.Heartbeat:Connect(function(dt)
 
     if not _targetCF then return end
 
-    -- Khởi tạo BodyPosition (Giữ Y) & BodyVelocity (Đẩy XZ)
-    if not bp or bp.Parent ~= hrp then
-        if bp then bp:Destroy() end
-        bp = Instance.new("BodyPosition")
-        bp.MaxForce = Vector3.new(0, math.huge, 0) -- Chỉ tác động trục Y
-        bp.P = 10000
-        bp.D = 1000
-        bp.Position = hrp.Position
-        bp.Parent = hrp
-    end
+    -- Di chuyển CFrame
+    local curPos = hrp.Position
+    local targetPos = _targetCF.Position
+    local delta = targetPos - curPos
+    local dist = delta.Magnitude
 
-    if not bv or bv.Parent ~= hrp then
-        if bv then bv:Destroy() end
-        bv = Instance.new("BodyVelocity")
-        bv.MaxForce = Vector3.new(math.huge, 0, math.huge) -- Chỉ tác động trục XZ
-        bv.Velocity = Vector3.zero
-        bv.Parent = hrp
-    end
-
-    local dist = (hrp.Position - _targetCF.Position).Magnitude
-    if dist > 3 then
-        -- Bay mượt tới đích
-        local dir = (_targetCF.Position - hrp.Position).Unit
-        bv.Velocity = dir * _G.FlySpeed
-        bp.Position = Vector3.new(hrp.Position.X, _targetCF.Position.Y, hrp.Position.Z)
+    if dist > 2 then
+        local moveDist = _G.FlySpeed * dt
+        if moveDist > dist then moveDist = dist end
+        local dir = delta.Unit
+        local newPos = curPos + dir * moveDist
+        hrp.CFrame = CFrame.new(Vector3.new(newPos.X, targetPos.Y, newPos.Z), Vector3.new(newPos.X, targetPos.Y, newPos.Z) + hrp.CFrame.LookVector)
     else
-        -- Đã tới nơi, dừng lại
-        bv.Velocity = Vector3.zero
-        bp.Position = Vector3.new(hrp.Position.X, _targetCF.Position.Y, hrp.Position.Z)
+        hrp.CFrame = CFrame.new(targetPos)
     end
 end)
 
@@ -625,4 +608,4 @@ SettingsTab:CreateToggle({
 })
 
 Rayfield:LoadConfiguration()
-print("[MANGO HUB] 🥭 V26 Loaded. Anti Snapback & Clean Logic.")
+print("[MANGO HUB] 🥭 V27 Loaded. CFrame + Physics Noclip.")
