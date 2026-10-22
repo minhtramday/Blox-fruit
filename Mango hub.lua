@@ -1,7 +1,7 @@
 -- ============================================================
--- MANGO HUB 🥭 - Rayfield UI + Hover Farm (V23 - PlatformStand Fix)
+-- MANGO HUB 🥭 - Rayfield UI + Hover Farm (V16 Modified)
 -- Yêu cầu executor: cloneref, bit32, sethiddenproperty
--- Đã sửa: Bật PlatformStand, hạ cánh xuống đất khi gặp NPC, chống kẹt.
+-- Đã sửa: Noclip xuyên tường, BodyVelocity giới hạn tốc độ.
 -- ============================================================
 
 local Players           = game:GetService("Players")
@@ -25,13 +25,17 @@ _G.FarAttackDelay  = 0.05
 _G.WeaponType      = "Melee"
 _G.UseBypass       = true
 _G.MobHoverHeight  = 5
-_G.HoverSpeed      = 100
+_G.NPCHoverOffset  = 5
+_G.FlySpeed        = 80   -- Tốc độ bay (studs/s) - An toàn
 _G.BringMobs       = false
 
 -- State
 local _targetCF = nil
-local _lastQuestTime = 0
+local _isStartingQuest = false
 local Mon, NameMon, NameQuest, QuestLv, CFrameQ, CFrameMon
+
+-- Body Movers
+local bp, bg, bv
 
 -- ============================================================
 -- RAYFIELD UI
@@ -40,7 +44,7 @@ local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
 local Window = Rayfield:CreateWindow({
    Name = "MANGO HUB 🥭",
-   LoadingTitle = "Mango Hub V23",
+   LoadingTitle = "Mango Hub V16",
    LoadingSubtitle = "by AI",
    ConfigurationSaving = { Enabled = false },
    KeySystem = false,
@@ -50,7 +54,7 @@ local FarmTab = Window:CreateTab("Farming 🥭", 4483362458)
 local SettingsTab = Window:CreateTab("Settings ⚙️", 4483362458)
 
 -- ============================================================
--- SIGNED REMOTE SCAN
+-- SIGNED REMOTE SCAN (bypass)
 -- ============================================================
 local signedRemote, signedId
 for _, container in ipairs({
@@ -77,6 +81,20 @@ LP.Idled:Connect(function()
     VirtualUser:Button2Down(Vector2.new(0, 0), workspace.CurrentCamera.CFrame)
     task.wait(1)
     VirtualUser:Button2Up(Vector2.new(0, 0), workspace.CurrentCamera.CFrame)
+end)
+
+-- ============================================================
+-- NOCLIP (Xuyên vật cản)
+-- ============================================================
+RunService.Stepped:Connect(function()
+    if not _G.AutoFarmLevel then return end
+    local char = LP.Character
+    if not char then return end
+    for _, v in ipairs(char:GetDescendants()) do
+        if v:IsA("BasePart") and v.CanCollide then
+            v.CanCollide = false
+        end
+    end
 end)
 
 -- ============================================================
@@ -423,7 +441,7 @@ task.spawn(function()
 
         local targetName = _G.AutoFarmLevel and Mon or nil
         local list, head = scanTargets(_G.FarAttackRadius, targetName)
-
+        
         if #list == 0 then continue end
 
         if _G.BringMobs then
@@ -455,16 +473,16 @@ task.spawn(function()
 end)
 
 -- ============================================================
--- FARM LOOP (PlatformStand + Bay tới NPC/Mob)
+-- FARM LOOP (Cập nhật _targetCF)
 -- ============================================================
 task.spawn(function()
     while task.wait(0.1) do
         if not _G.AutoFarmLevel then
             _targetCF = nil
-            local char = LP.Character
-            if char and char:FindFirstChild("Humanoid") then
-                char.Humanoid.PlatformStand = false -- Tắt lơ lửng khi ngừng farm
-            end
+            _isStartingQuest = false
+            if bp then bp:Destroy(); bp = nil end
+            if bg then bg:Destroy(); bg = nil end
+            if bv then bv:Destroy(); bv = nil end
             continue
         end
 
@@ -473,9 +491,6 @@ task.spawn(function()
         local hum = char:FindFirstChildOfClass("Humanoid")
         local hrp = char:FindFirstChild("HumanoidRootPart")
         if not hum or not hrp or hum.Health <= 0 then continue end
-
-        -- Bật PlatformStand để không rớt
-        hum.PlatformStand = true
 
         pcall(function()
             CheckLevel()
@@ -486,22 +501,24 @@ task.spawn(function()
                 questVisible = LP.PlayerGui.Main.Quest.Visible
             end)
 
-            -- 1. Chưa có Quest -> Tới NPC (Đứng dưới đất)
+            if _isStartingQuest then
+                questVisible = true
+            end
+
+            -- 1. Chưa có Quest -> Bay tới NPC
             if not questVisible then
-                -- Lấy đúng tọa độ NPC (Không cộng thêm studs)
-                _targetCF = CFrame.new(CFrameQ.X, CFrameQ.Y, CFrameQ.Z)
+                _targetCF = CFrameQ * CFrame.new(0, _G.NPCHoverOffset, 0)
                 
                 local xzDist = (Vector2.new(hrp.Position.X, hrp.Position.Z) - Vector2.new(CFrameQ.X, CFrameQ.Z)).Magnitude
-                
-                -- Gửi lệnh nhận quest nếu ở gần và hết cooldown 2 giây
-                if xzDist < 15 and (os.clock() - _lastQuestTime > 2) then
-                    _lastQuestTime = os.clock()
+                if xzDist < 15 and not _isStartingQuest then
+                    _isStartingQuest = true
                     ReplicatedStorage.Remotes.CommF_:InvokeServer("StartQuest", NameQuest, QuestLv)
+                    task.delay(1.5, function() _isStartingQuest = false end)
                 end
                 return
             end
 
-            -- 2. Có Quest -> Tìm mob
+            -- 2. Đã có Quest -> Tìm quái
             local targetMob = nil
             local enemies = Workspace:FindFirstChild("Enemies")
             if enemies then
@@ -514,55 +531,81 @@ task.spawn(function()
             end
 
             if targetMob then
-                -- Bay lên đầu mob
-                local mobY = targetMob.HumanoidRootPart.Position.Y + _G.MobHoverHeight
-                _targetCF = CFrame.new(targetMob.HumanoidRootPart.Position.X, mobY, targetMob.HumanoidRootPart.Position.Z)
+                -- Bay tới đầu quái (Không cộng Y ảo, dùng đúng vị trí)
+                _targetCF = CFrame.new(targetMob.HumanoidRootPart.Position.X, targetMob.HumanoidRootPart.Position.Y + _G.MobHoverHeight, targetMob.HumanoidRootPart.Position.Z)
             else
-                -- Không thấy quái -> Bay tới điểm spawn (CFrameMon) chờ
-                local spawnY = CFrameMon.Y + _G.MobHoverHeight
-                _targetCF = CFrame.new(CFrameMon.X, spawnY, CFrameMon.Z)
+                -- Không có quái -> Bay tới CFrameMon chờ spawn
+                _targetCF = CFrame.new(CFrameMon.X, CFrameMon.Y + _G.MobHoverHeight, CFrameMon.Z)
             end
         end)
     end
 end)
 
 -- ============================================================
--- MOVEMENT & NOCLIP LOOP (Xuyên vật cản + Bay mượt)
+-- MOVEMENT LOOP (BodyVelocity XZ + BodyPosition Y)
 -- ============================================================
-RunService.Stepped:Connect(function(time, deltaTime)
-    if not _G.AutoFarmLevel then return end
-
-    local char = LP.Character
-    if not char then return end
-    local hrp = char:FindFirstChild("HumanoidRootPart")
-    if not hrp then return end
-
-    -- 1. NoClip (Xuyên vật cản)
-    for _, v in ipairs(char:GetDescendants()) do
-        if v:IsA("BasePart") and v.CanCollide then
-            v.CanCollide = false
+task.spawn(function()
+    while task.wait() do
+        if not _G.AutoFarmLevel then
+            if bp then bp:Destroy(); bp = nil end
+            if bg then bg:Destroy(); bg = nil end
+            if bv then bv:Destroy(); bv = nil end
+            task.wait(0.5)
+            continue
         end
-    end
 
-    -- 2. Di chuyển tới _targetCF
-    if _targetCF then
-        local curPos = hrp.Position
-        local targetPos = _targetCF.Position
-        local delta = targetPos - curPos
-        local dist = delta.Magnitude
+        local char = LP.Character
+        if not char then continue end
+        local hrp = char:FindFirstChild("HumanoidRootPart")
+        local hum = char:FindFirstChild("Humanoid")
+        if not hrp or not hum then continue end
+        if not _targetCF then continue end
 
-        if dist > 2 then
-            -- Tính toán khoảng cách bay dựa vào tốc độ (studs/s)
-            local moveDist = _G.HoverSpeed * deltaTime
-            if moveDist > dist then moveDist = dist end
-            
-            local dir = delta.Unit
-            local newPos = curPos + dir * moveDist
-            hrp.CFrame = CFrame.new(newPos, newPos + dir * 10)
+        -- BodyPosition (Chỉ trục Y, chống rớt)
+        if not bp or bp.Parent ~= hrp then
+            if bp then bp:Destroy() end
+            bp = Instance.new("BodyPosition")
+            bp.MaxForce = Vector3.new(0, math.huge, 0)
+            bp.P = 10000
+            bp.D = 500
+            bp.Position = hrp.Position
+            bp.Parent = hrp
+        end
+
+        -- BodyVelocity (Chỉ trục XZ, giới hạn tốc độ)
+        if not bv or bv.Parent ~= hrp then
+            if bv then bv:Destroy() end
+            bv = Instance.new("BodyVelocity")
+            bv.MaxForce = Vector3.new(math.huge, 0, math.huge)
+            bv.Velocity = Vector3.zero
+            bv.Parent = hrp
+        end
+
+        -- BodyGyro (Giữ hướng)
+        if not bg or bg.Parent ~= hrp then
+            if bg then bg:Destroy() end
+            bg = Instance.new("BodyGyro")
+            bg.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
+            bg.P = 10000
+            bg.D = 500
+            bg.CFrame = hrp.CFrame
+            bg.Parent = hrp
+        end
+
+        local delta = _targetCF.Position - hrp.Position
+        local horizDelta = Vector3.new(delta.X, 0, delta.Z)
+        local horizDist = horizDelta.Magnitude
+
+        if horizDist > 3 then
+            -- Bay với tốc độ được set trong Config
+            bv.Velocity = horizDelta.Unit * _G.FlySpeed
         else
-            -- Đã tới đích, ghim chặt vị trí
-            hrp.CFrame = CFrame.new(targetPos)
+            bv.Velocity = Vector3.zero
         end
+
+        -- Ghim trục Y cố định
+        bp.Position = Vector3.new(hrp.Position.X, _targetCF.Position.Y, hrp.Position.Z)
+        bg.CFrame = _targetCF
     end
 end)
 
@@ -592,14 +635,14 @@ FarmTab:CreateSlider({
 })
 
 FarmTab:CreateSlider({
-   Name = "Fly Speed",
-   Range = {30, 150},
+   Name = "Fly Speed (studs/s)",
+   Range = {40, 120},
    Increment = 10,
    Suffix = "studs/s",
    CurrentValue = 80,
-   Flag = "HoverSpeed",
+   Flag = "FlySpeed",
    Callback = function(Value)
-       _G.HoverSpeed = Value
+       _G.FlySpeed = Value
    end,
 })
 
@@ -665,4 +708,4 @@ SettingsTab:CreateToggle({
 })
 
 Rayfield:LoadConfiguration()
-print("[MANGO HUB] 🥭 V23 Loaded. PlatformStand & NPC Ground Fix.")
+print("[MANGO HUB] 🥭 V16 Modified - Noclip & Speed Cap applied.")
