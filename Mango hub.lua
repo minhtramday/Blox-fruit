@@ -1,7 +1,7 @@
 -- ============================================================
--- MANGO HUB 🥭 - Rayfield UI + Hover Farm (V16 - Final Stable Fly)
+-- MANGO HUB 🥭 - Rayfield UI + Hover Farm (V17 - BodyVelocity Cap)
 -- Yêu cầu executor: cloneref, bit32, sethiddenproperty
--- Đã sửa: Dùng BodyPosition (không rớt), chống kẹt NPC, bay tới CFrameMon.
+-- Đã sửa: Dùng BodyVelocity (capped 100 studs/s) thay vì BodyPosition.
 -- ============================================================
 
 local Players           = game:GetService("Players")
@@ -26,6 +26,7 @@ _G.WeaponType      = "Melee"
 _G.UseBypass       = true
 _G.MobHoverHeight  = 5
 _G.NPCHoverOffset  = 5
+_G.HoverSpeed      = 100   -- studs/s (an toàn)
 _G.BringMobs       = false
 
 -- State
@@ -33,8 +34,8 @@ local _targetCF = nil
 local _isStartingQuest = false
 local Mon, NameMon, NameQuest, QuestLv, CFrameQ, CFrameMon
 
--- Body Movers
-local bp, bg
+-- Movers
+local bv, bp
 
 -- ============================================================
 -- RAYFIELD UI
@@ -43,7 +44,7 @@ local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
 local Window = Rayfield:CreateWindow({
    Name = "MANGO HUB 🥭",
-   LoadingTitle = "Mango Hub V16",
+   LoadingTitle = "Mango Hub V17",
    LoadingSubtitle = "by AI",
    ConfigurationSaving = { Enabled = false },
    KeySystem = false,
@@ -53,7 +54,7 @@ local FarmTab = Window:CreateTab("Farming 🥭", 4483362458)
 local SettingsTab = Window:CreateTab("Settings ⚙️", 4483362458)
 
 -- ============================================================
--- SIGNED REMOTE SCAN (bypass)
+-- SIGNED REMOTE SCAN
 -- ============================================================
 local signedRemote, signedId
 for _, container in ipairs({
@@ -426,7 +427,7 @@ task.spawn(function()
 
         local targetName = _G.AutoFarmLevel and Mon or nil
         local list, head = scanTargets(_G.FarAttackRadius, targetName)
-        
+
         if #list == 0 then continue end
 
         if _G.BringMobs then
@@ -458,15 +459,15 @@ task.spawn(function()
 end)
 
 -- ============================================================
--- FARM LOOP (Sử dụng BodyPosition & Fallback CFrameMon)
+-- FARM LOOP (Cập nhật _targetCF)
 -- ============================================================
 task.spawn(function()
     while task.wait(0.1) do
         if not _G.AutoFarmLevel then
             _targetCF = nil
             _isStartingQuest = false
+            if bv then bv:Destroy(); bv = nil end
             if bp then bp:Destroy(); bp = nil end
-            if bg then bg:Destroy(); bg = nil end
             continue
         end
 
@@ -485,7 +486,6 @@ task.spawn(function()
                 questVisible = LP.PlayerGui.Main.Quest.Visible
             end)
 
-            -- Chống kẹt NPC: Nếu vừa gửi StartQuest, tạm bỏ qua check questVisible trong 2 giây
             if _isStartingQuest then
                 questVisible = true
             end
@@ -493,7 +493,6 @@ task.spawn(function()
             -- 1. Chưa có Quest -> Bay tới NPC
             if not questVisible then
                 _targetCF = CFrameQ * CFrame.new(0, _G.NPCHoverOffset, 0)
-                
                 if (hrp.Position - CFrameQ.Position).Magnitude < 20 then
                     _isStartingQuest = true
                     ReplicatedStorage.Remotes.CommF_:InvokeServer("StartQuest", NameQuest, QuestLv)
@@ -515,10 +514,8 @@ task.spawn(function()
             end
 
             if targetMob then
-                -- Có quái -> Bay tới đầu quái
                 _targetCF = targetMob.HumanoidRootPart.CFrame * CFrame.new(0, _G.MobHoverHeight, 0)
             else
-                -- Không có quái -> Bay tới CFrameMon (điểm spawn quái)
                 _targetCF = CFrameMon * CFrame.new(0, _G.MobHoverHeight, 0)
             end
         end)
@@ -526,13 +523,13 @@ task.spawn(function()
 end)
 
 -- ============================================================
--- MOVEMENT LOOP (BodyPosition & BodyGyro - Giữ lơ lửng, không rớt)
+-- MOVEMENT LOOP (BodyVelocity capped + BodyPosition Y-only)
 -- ============================================================
 task.spawn(function()
     while task.wait() do
         if not _G.AutoFarmLevel then
+            if bv then bv:Destroy(); bv = nil end
             if bp then bp:Destroy(); bp = nil end
-            if bg then bg:Destroy(); bg = nil end
             task.wait(0.5)
             continue
         end
@@ -540,46 +537,50 @@ task.spawn(function()
         local char = LP.Character
         if not char then continue end
         local hrp = char:FindFirstChild("HumanoidRootPart")
-        local hum = char:FindFirstChild("Humanoid")
-        if not hrp or not hum then continue end
-
+        if not hrp then continue end
         if not _targetCF then continue end
 
-        -- Khởi tạo BodyPosition & BodyGyro nếu chưa có
+        -- Init BodyVelocity (XZ only)
+        if not bv or bv.Parent ~= hrp then
+            if bv then bv:Destroy() end
+            bv = Instance.new("BodyVelocity")
+            bv.Name = "MangoVel"
+            bv.MaxForce = Vector3.new(math.huge, 0, math.huge)  -- XZ only
+            bv.Velocity = Vector3.zero
+            bv.Parent = hrp
+        end
+
+        -- Init BodyPosition (Y only)
         if not bp or bp.Parent ~= hrp then
             if bp then bp:Destroy() end
             bp = Instance.new("BodyPosition")
-            bp.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
-            bp.P = 15000
-            bp.D = 1000
+            bp.Name = "MangoY"
+            bp.MaxForce = Vector3.new(0, math.huge, 0)  -- Y only
+            bp.P = 8000
+            bp.D = 500
             bp.Position = hrp.Position
             bp.Parent = hrp
         end
 
-        if not bg or bg.Parent ~= hrp then
-            if bg then bg:Destroy() end
-            bg = Instance.new("BodyGyro")
-            bg.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
-            bg.P = 15000
-            bg.D = 1000
-            bg.CFrame = hrp.CFrame
-            bg.Parent = hrp
+        local delta = _targetCF.Position - hrp.Position
+        local horizDelta = Vector3.new(delta.X, 0, delta.Z)
+        local horizDist = horizDelta.Magnitude
+
+        -- Long distance: teleport (single frame, server accepts)
+        if horizDist > 1000 then
+            local jumpPos = hrp.Position + horizDelta.Unit * 800
+            hrp.CFrame = CFrame.new(jumpPos.X, hrp.Position.Y, jumpPos.Z)
+            bv.Velocity = Vector3.zero
+        elseif horizDist > 3 then
+            -- Speed capped at _G.HoverSpeed, slow down when close
+            local speed = math.min(_G.HoverSpeed, horizDist * 4)
+            bv.Velocity = horizDelta.Unit * speed
+        else
+            bv.Velocity = Vector3.zero
         end
 
-        -- Di chuyển
-        local dist = (hrp.Position - _targetCF.Position).Magnitude
-        if dist > 3 then
-            -- Nếu xa quá (do map rộng), teleport gần lại để tránh BodyPosition kéo văng
-            if dist > 1000 then
-                hrp.CFrame = CFrame.new(hrp.Position + (_targetCF.Position - hrp.Position).Unit * 800)
-            end
-            bp.Position = _targetCF.Position
-            bg.CFrame = _targetCF
-        else
-            -- Đã tới nơi, khóa cứng
-            bp.Position = _targetCF.Position
-            bg.CFrame = _targetCF
-        end
+        -- Y-lock at target height
+        bp.Position = Vector3.new(hrp.Position.X, _targetCF.Position.Y, hrp.Position.Z)
     end
 end)
 
@@ -605,6 +606,18 @@ FarmTab:CreateSlider({
    Flag = "MobHoverHeight",
    Callback = function(Value)
        _G.MobHoverHeight = Value
+   end,
+})
+
+FarmTab:CreateSlider({
+   Name = "Fly Speed (studs/s)",
+   Range = {50, 200},
+   Increment = 10,
+   Suffix = "studs/s",
+   CurrentValue = 100,
+   Flag = "HoverSpeed",
+   Callback = function(Value)
+       _G.HoverSpeed = Value
    end,
 })
 
@@ -670,4 +683,4 @@ SettingsTab:CreateToggle({
 })
 
 Rayfield:LoadConfiguration()
-print("[MANGO HUB] 🥭 V16 Loaded. BodyPosition applied.")
+print("[MANGO HUB] 🥭 V17 Loaded. BodyVelocity @ " .. _G.HoverSpeed .. " studs/s.")
