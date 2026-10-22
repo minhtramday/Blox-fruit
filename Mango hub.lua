@@ -1,5 +1,5 @@
 -- ============================================================
--- MANGO HUB 🥭 - V34 (Attack Always On + Fix Farm Teleport)
+-- MANGO HUB 🥭 - V37 (Exact NPC Coordinates)
 -- Yêu cầu executor: cloneref, bit32, sethiddenproperty
 -- ============================================================
 
@@ -26,7 +26,6 @@ _G.FarAttackDelay  = 0.05
 _G.WeaponType      = "Melee"
 _G.UseBypass       = true
 _G.MobHoverHeight  = 5
-_G.NPCHoverOffset  = 3
 _G.BringMobs       = false
 
 -- State
@@ -62,8 +61,8 @@ local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
 local Window = Rayfield:CreateWindow({
    Name = "MANGO HUB 🥭",
-   LoadingTitle = "Mango Hub V34",
-   LoadingSubtitle = "by AI",
+   LoadingTitle = "Mango Hub",
+   LoadingSubtitle = "by Minh hub",
    ConfigurationSaving = { Enabled = false },
    KeySystem = false,
 })
@@ -161,7 +160,7 @@ local function BKP(cf)
 end
 
 -- ============================================================
--- CHECK LEVEL
+-- CHECK LEVEL (ĐÃ CẬP NHẬT TOẠ ĐỘ NPC CHUẨN TỪ SCAN)
 -- ============================================================
 function CheckLevel()
     local lvl = LP.Data.Level.Value
@@ -172,10 +171,10 @@ function CheckLevel()
             CFrameQ=CFrame.new(1059.37,15.45,1550.42); CFrameMon=CFrame.new(1045.96, 13.00, 1560.82)
         elseif lvl <= 14 then
             Mon="Monkey"; NameMon="Monkey"; NameQuest="JungleQuest"; QuestLv=1
-            CFrameQ=CFrame.new(-1598.09,35.55,153.38); CFrameMon=CFrame.new(-1448.52, 29.62, 11.47)
+            CFrameQ=CFrame.new(-1681.16, 50.07, 174.02); CFrameMon=CFrame.new(-1448.52, 29.62, 11.47)
         elseif lvl <= 29 then
             Mon="Gorilla"; NameMon="Gorilla"; NameQuest="JungleQuest"; QuestLv=2
-            CFrameQ=CFrame.new(-1598.09,35.55,153.38); CFrameMon=CFrame.new(-1266.57, 13.08, -462.02)
+            CFrameQ=CFrame.new(-1681.16, 50.07, 174.02); CFrameMon=CFrame.new(-1266.57, 13.08, -462.02)
         elseif lvl <= 39 then
             Mon="Pirate"; NameMon="Pirate"; NameQuest="BuggyQuest1"; QuestLv=1
             CFrameQ=CFrame.new(-1141.07,4.10,3831.55); CFrameMon=CFrame.new(-1103.51, 13.75, 3896.09)
@@ -330,7 +329,7 @@ local function fireHit(head, list)
 end
 
 -- ============================================================
--- ATTACK LOOP (LUÔN BẬT - ĐÁNH MỌI THỨ)
+-- ATTACK LOOP
 -- ============================================================
 task.spawn(function()
     while task.wait(_G.FarAttackDelay) do
@@ -345,7 +344,6 @@ task.spawn(function()
         if w then equipWeapon(w) end
         AutoHaki()
 
-        -- Quét TẤT CẢ quái trong bán kính 60 studs
         local list, head = scanTargets(_G.FarAttackRadius)
         if #list == 0 then continue end
 
@@ -378,10 +376,10 @@ task.spawn(function()
 end)
 
 -- ============================================================
--- FARM LOOP (Delay 0.5s, Không Ping-pong)
+-- FARM LOOP (Đã cập nhật tọa độ NPC chuẩn)
 -- ============================================================
 task.spawn(function()
-    while task.wait(0.5) do -- Delay 0.5s chống spam
+    while task.wait(0.5) do
         if not (_G.AutoFarmLevel or _G.AutoFarmBoss) then
             _isStartingQuest = false
             _questActive = false
@@ -452,14 +450,19 @@ task.spawn(function()
                 -- Chưa có Quest -> Tới NPC
                 if not questVisible then
                     local distToNPC = (hrp.Position - CFrameQ.Position).Magnitude
+                    local xzDist = (Vector2.new(hrp.Position.X, hrp.Position.Z) - Vector2.new(CFrameQ.X, CFrameQ.Z)).Magnitude
                     
-                    -- Chỉ BKP nếu ở xa NPC
-                    if distToNPC > 20 then
-                        BKP(CFrameQ * CFrame.new(0, _G.NPCHoverOffset, 0))
+                    -- BKP tới thẳng NPC nếu ở xa
+                    if distToNPC > 15 then
+                        BKP(CFrameQ)
                     end
                     
-                    local xzDist = (Vector2.new(hrp.Position.X, hrp.Position.Z) - Vector2.new(CFrameQ.X, CFrameQ.Z)).Magnitude
-                    if xzDist < 20 and not _isStartingQuest then
+                    if xzDist < 15 and not _isStartingQuest then
+                        -- Tắt BodyClip để nhân vật chạm đất
+                        if hrp:FindFirstChild("BodyClip") then
+                            hrp.BodyClip:Destroy()
+                        end
+                        
                         _isStartingQuest = true
                         _questActive = true
                         _questGraceTime = tick()
@@ -488,8 +491,7 @@ task.spawn(function()
                 end
 
                 if targetMob then
-                    -- Nếu khoảng cách tới quái > 20 studs mới BKP
-                    if nearestDist > 20 then
+                    if nearestDist > 15 then
                         BKP(CFrame.new(targetMob.HumanoidRootPart.Position.X, targetMob.HumanoidRootPart.Position.Y + _G.MobHoverHeight, targetMob.HumanoidRootPart.Position.Z))
                     end
                 else
@@ -501,7 +503,7 @@ task.spawn(function()
 end)
 
 -- ============================================================
--- BODY CLIP (Chống Snapback)
+-- BODY CLIP (Chống Snapback - Tự động bật lại khi bay farm)
 -- ============================================================
 task.spawn(function()
     while task.wait() do
@@ -510,12 +512,20 @@ task.spawn(function()
                 local char = LP.Character
                 if char then
                     local hrp = char:FindFirstChild("HumanoidRootPart")
-                    if hrp and not hrp:FindFirstChild("BodyClip") then
+                    -- Chỉ bật BodyClip nếu đang có Quest (đang bay đi farm), không bật khi ở NPC
+                    local isFarming = false
+                    pcall(function()
+                        isFarming = LP.PlayerGui.Main.Quest.Visible
+                    end)
+                    
+                    if isFarming and not hrp:FindFirstChild("BodyClip") then
                         local bv = Instance.new("BodyVelocity")
                         bv.Name = "BodyClip"
                         bv.MaxForce = Vector3.new(100000, 100000, 100000)
                         bv.Velocity = Vector3.new(0, 0, 0)
                         bv.Parent = hrp
+                    elseif not isFarming and hrp:FindFirstChild("BodyClip") then
+                        hrp.BodyClip:Destroy()
                     end
                 end
             else
@@ -622,4 +632,4 @@ SettingsTab:CreateToggle({
 })
 
 Rayfield:LoadConfiguration()
-print("[MANGO HUB] 🥭 V34 Loaded. Attack Always On + Fix Farm Teleport.")
+print("[MANGO HUB] 🥭 V37 Loaded. Exact NPC Coordinates.")
