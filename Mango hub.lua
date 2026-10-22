@@ -1,5 +1,5 @@
 -- ============================================================
--- MANGO HUB 🥭 - V46 (Tiếng Việt + Luôn Đánh + Bay Chậm)
+-- MANGO HUB 🥭 - V47 (Chunked Teleport - Không bị kéo về)
 -- By Minh Hub
 -- Yêu cầu executor: cloneref, bit32, sethiddenproperty
 -- ============================================================
@@ -19,7 +19,7 @@ local CommF     = ReplicatedStorage.Remotes.CommF_
 -- ============================================================
 -- CẤU HÌNH
 -- ============================================================
-_G.TuDanhXa       = true     -- Luôn bật mặc định
+_G.TuDanhXa       = true
 _G.TuDongCayCap   = false
 _G.TuDongDanhBoss = false
 _G.ChonBoss       = "The Gorilla King"
@@ -28,7 +28,7 @@ _G.TocDoDanh      = 0.05
 _G.LoaiVuKhi      = "Melee"
 _G.DungBypass     = true
 _G.DoCaoLoLung    = 5
-_G.TocDoBay       = 50     -- Bay chậm an toàn
+_G.TocDoBay       = 100    -- studs/s (sẽ chia nhỏ ra mỗi frame)
 _G.GomQuai        = false
 
 -- Biến trạng thái
@@ -37,9 +37,6 @@ local _questMissingTime = 0
 local _lastQuestTime = 0
 local _targetCF = nil
 local Mon, NameMon, NameQuest, QuestLv, CFrameQ, CFrameMon
-
--- Body Movers
-local bp, bg
 
 -- Dữ liệu Boss
 local BossData = {
@@ -154,7 +151,7 @@ local function AutoHaki()
 end
 
 -- ============================================================
--- CHECK LEVEL (Tọa độ NPC Adventurer chuẩn)
+-- CHECK LEVEL
 -- ============================================================
 function CheckLevel()
     local lvl = LP.Data.Level.Value
@@ -475,21 +472,17 @@ task.spawn(function()
 end)
 
 -- ============================================================
--- VÒNG LẶP DI CHUYỂN (BodyPosition - Bay Chậm)
+-- VÒNG LẶP DI CHUYỂN (Chunked Teleport - Xuyên tường, Không bị kéo)
 -- ============================================================
-RunService.Heartbeat:Connect(function()
-    if not (_G.TuDongCayCap or _G.TuDongDanhBoss) then
-        if bp then bp:Destroy(); bp = nil end
-        if bg then bg:Destroy(); bg = nil end
-        return
-    end
+RunService.Stepped:Connect(function(time, deltaTime)
+    if not (_G.TuDongCayCap or _G.TuDongDanhBoss) then return end
 
     local char = LP.Character
     if not char then return end
     local hrp = char:FindFirstChild("HumanoidRootPart")
     if not hrp then return end
 
-    -- Xuyên vật cản
+    -- Noclip
     for _, v in ipairs(char:GetDescendants()) do
         if v:IsA("BasePart") and v.CanCollide then
             v.CanCollide = false
@@ -498,40 +491,24 @@ RunService.Heartbeat:Connect(function()
 
     if not _targetCF then return end
 
-    if not bp or bp.Parent ~= hrp then
-        if bp then bp:Destroy() end
-        bp = Instance.new("BodyPosition")
-        bp.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
-        bp.P = 10000
-        bp.D = 500
-        bp.Position = hrp.Position
-        bp.Parent = hrp
-    end
+    local curPos = hrp.Position
+    local targetPos = _targetCF.Position
+    local delta = targetPos - curPos
+    local dist = delta.Magnitude
 
-    if not bg or bg.Parent ~= hrp then
-        if bg then bg:Destroy() end
-        bg = Instance.new("BodyGyro")
-        bg.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
-        bg.P = 10000
-        bg.D = 500
-        bg.CFrame = hrp.CFrame
-        bg.Parent = hrp
-    end
-
-    local dist = (hrp.Position - _targetCF.Position).Magnitude
-    if dist > 3 then
-        if dist > 2000 then
-            hrp.CFrame = CFrame.new(hrp.Position + (_targetCF.Position - hrp.Position).Unit * 1500)
-            dist = 500
-        end
-        -- Bay chậm bằng cách giới hạn vị trí đích
-        local dir = (_targetCF.Position - hrp.Position).Unit
-        local step = _G.TocDoBay * RunService.Heartbeat:Wait()
-        bp.Position = hrp.Position + dir * math.min(step, dist)
-        bg.CFrame = _targetCF
+    -- Bay mượt nhưng an toàn (Teleport chunk)
+    if dist > 2 then
+        -- Tính toán khoảng cách bay trong frame này
+        local moveDist = _G.TocDoBay * deltaTime
+        if moveDist > dist then moveDist = dist end
+        
+        local dir = delta.Unit
+        local newPos = curPos + dir * moveDist
+        
+        -- Ghim Y cố định theo target
+        hrp.CFrame = CFrame.new(Vector3.new(newPos.X, targetPos.Y, newPos.Z), Vector3.new(newPos.X, targetPos.Y, newPos.Z) + dir * 10)
     else
-        bp.Position = _targetCF.Position
-        bg.CFrame = _targetCF
+        hrp.CFrame = CFrame.new(targetPos)
     end
 end)
 
@@ -563,10 +540,10 @@ TabCayCap:CreateSlider({
 
 TabCayCap:CreateSlider({
    Name = "Tốc Độ Bay",
-   Range = {30, 150},
+   Range = {50, 150},
    Increment = 10,
    Suffix = "studs/s",
-   CurrentValue = 50,
+   CurrentValue = 100,
    Flag = "TocDoBay",
    Callback = function(Value) _G.TocDoBay = Value end,
 })
