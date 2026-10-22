@@ -1,7 +1,6 @@
 -- ============================================================
--- MANGO HUB 🥭 - V25 (Boss Farm + Real Coordinates Fix)
+-- MANGO HUB 🥭 - V26 (Anti Snapback + Fix Quest Logic)
 -- Yêu cầu executor: cloneref, bit32, sethiddenproperty
--- Đã sửa: Cập nhật tọa độ Y chuẩn từ Scanner + Thêm Auto Boss.
 -- ============================================================
 
 local Players           = game:GetService("Players")
@@ -36,6 +35,9 @@ local _targetCF = nil
 local _isStartingQuest = false
 local Mon, NameMon, NameQuest, QuestLv, CFrameQ, CFrameMon
 
+-- Movers
+local bp, bv
+
 -- Boss Data (Sea 1)
 local BossData = {
     ["The Gorilla King"] = CFrame.new(-1088.75, 8.13, -488.55),
@@ -63,7 +65,7 @@ local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
 local Window = Rayfield:CreateWindow({
    Name = "MANGO HUB 🥭",
-   LoadingTitle = "Mango Hub V25",
+   LoadingTitle = "Mango Hub V26",
    LoadingSubtitle = "by AI",
    ConfigurationSaving = { Enabled = false },
    KeySystem = false,
@@ -163,7 +165,7 @@ function CheckLevel()
             CFrameQ=CFrame.new(-1598.09,35.55,153.38); CFrameMon=CFrame.new(-1448.52, 29.62, 11.47)
         elseif lvl <= 29 then
             Mon="Gorilla"; NameMon="Gorilla"; NameQuest="JungleQuest"; QuestLv=2
-            CFrameQ=CFrame.new(-1598.09,35.55,153.38); CFrameMon=CFrame.new(-1266.57, 13.08, -462.02) -- Fix từ scan
+            CFrameQ=CFrame.new(-1598.09,35.55,153.38); CFrameMon=CFrame.new(-1266.57, 13.08, -462.02)
         elseif lvl <= 39 then
             Mon="Pirate"; NameMon="Pirate"; NameQuest="BuggyQuest1"; QuestLv=1
             CFrameQ=CFrame.new(-1141.07,4.10,3831.55); CFrameMon=CFrame.new(-1103.51, 13.75, 3896.09)
@@ -376,7 +378,7 @@ task.spawn(function()
 end)
 
 -- ============================================================
--- FARM LOOP (Xử lý cả Farm Level và Farm Boss)
+-- FARM LOOP (Kiểm tra Quest đơn giản)
 -- ============================================================
 task.spawn(function()
     while task.wait(0.1) do
@@ -398,7 +400,6 @@ task.spawn(function()
                 local bossName = _G.SelectBoss
                 local targetBoss = nil
                 
-                -- Tìm boss trong Enemies
                 local enemies = Workspace:FindFirstChild("Enemies")
                 if enemies then
                     for _, v in pairs(enemies:GetChildren()) do
@@ -410,10 +411,8 @@ task.spawn(function()
                 end
 
                 if targetBoss then
-                    -- Bay tới chỗ boss đang đứng
                     _targetCF = CFrame.new(targetBoss.HumanoidRootPart.Position.X, targetBoss.HumanoidRootPart.Position.Y + _G.MobHoverHeight, targetBoss.HumanoidRootPart.Position.Z)
                 else
-                    -- Không thấy boss -> Bay tới điểm spawn của boss chờ
                     local spawnCF = BossData[bossName]
                     if spawnCF then
                         _targetCF = CFrame.new(spawnCF.X, spawnCF.Y + _G.MobHoverHeight, spawnCF.Z)
@@ -428,18 +427,14 @@ task.spawn(function()
                 if not Mon or not CFrameQ then return end
 
                 local questVisible = false
-                local questText = ""
                 pcall(function()
                     questVisible = LP.PlayerGui.Main.Quest.Visible
-                    if questVisible then
-                        questText = LP.PlayerGui.Main.Quest.Container.QuestTitle.Title.Text
-                    end
                 end)
 
                 if _isStartingQuest then questVisible = true end
 
-                -- Chưa có Quest hoặc sai Quest -> Về NPC
-                if not questVisible or (questText ~= "" and not string.find(questText, NameMon)) then
+                -- Nếu chưa có quest -> Tới NPC
+                if not questVisible then
                     _targetCF = CFrameQ * CFrame.new(0, _G.NPCHoverOffset, 0)
                     
                     local xzDist = (Vector2.new(hrp.Position.X, hrp.Position.Z) - Vector2.new(CFrameQ.X, CFrameQ.Z)).Magnitude
@@ -451,7 +446,7 @@ task.spawn(function()
                     return
                 end
 
-                -- Đã có Quest đúng -> Tìm quái
+                -- Nếu đã có quest -> Tìm quái
                 local targetMob = nil
                 local enemies = Workspace:FindFirstChild("Enemies")
                 if enemies then
@@ -474,44 +469,64 @@ task.spawn(function()
 end)
 
 -- ============================================================
--- MOVEMENT & NOCLIP LOOP
+-- MOVEMENT LOOP (BodyVelocity + BodyPosition chống snapback)
 -- ============================================================
 RunService.Heartbeat:Connect(function(dt)
-    if not (_G.AutoFarmLevel or _G.AutoFarmBoss) or not _targetCF then return end
+    if not (_G.AutoFarmLevel or _G.AutoFarmBoss) then
+        if bp then bp:Destroy(); bp = nil end
+        if bv then bv:Destroy(); bv = nil end
+        return
+    end
 
     local char = LP.Character
     if not char then return end
     local hrp = char:FindFirstChild("HumanoidRootPart")
     if not hrp then return end
 
-    -- Noclip xuyên vật cản
+    -- Bật Noclip để bay xuyên tường
     for _, v in ipairs(char:GetDescendants()) do
         if v:IsA("BasePart") and v.CanCollide then
             v.CanCollide = false
         end
     end
 
-    -- Di chuyển CFrame (tốc độ giới hạn an toàn)
-    local curPos = hrp.Position
-    local targetPos = _targetCF.Position
-    local delta = targetPos - curPos
-    local dist = delta.Magnitude
+    if not _targetCF then return end
 
-    if dist > 2 then
-        local moveDist = _G.FlySpeed * dt
-        if moveDist > dist then moveDist = dist end
-        local dir = delta.Unit
-        local newPos = curPos + dir * moveDist
-        hrp.CFrame = CFrame.new(Vector3.new(newPos.X, targetPos.Y, newPos.Z), Vector3.new(newPos.X, targetPos.Y, newPos.Z) + hrp.CFrame.LookVector)
+    -- Khởi tạo BodyPosition (Giữ Y) & BodyVelocity (Đẩy XZ)
+    if not bp or bp.Parent ~= hrp then
+        if bp then bp:Destroy() end
+        bp = Instance.new("BodyPosition")
+        bp.MaxForce = Vector3.new(0, math.huge, 0) -- Chỉ tác động trục Y
+        bp.P = 10000
+        bp.D = 1000
+        bp.Position = hrp.Position
+        bp.Parent = hrp
+    end
+
+    if not bv or bv.Parent ~= hrp then
+        if bv then bv:Destroy() end
+        bv = Instance.new("BodyVelocity")
+        bv.MaxForce = Vector3.new(math.huge, 0, math.huge) -- Chỉ tác động trục XZ
+        bv.Velocity = Vector3.zero
+        bv.Parent = hrp
+    end
+
+    local dist = (hrp.Position - _targetCF.Position).Magnitude
+    if dist > 3 then
+        -- Bay mượt tới đích
+        local dir = (_targetCF.Position - hrp.Position).Unit
+        bv.Velocity = dir * _G.FlySpeed
+        bp.Position = Vector3.new(hrp.Position.X, _targetCF.Position.Y, hrp.Position.Z)
     else
-        hrp.CFrame = CFrame.new(targetPos)
+        -- Đã tới nơi, dừng lại
+        bv.Velocity = Vector3.zero
+        bp.Position = Vector3.new(hrp.Position.X, _targetCF.Position.Y, hrp.Position.Z)
     end
 end)
 
 -- ============================================================
 -- RAYFIELD UI CONFIG
 -- ============================================================
--- FARM TAB
 FarmTab:CreateToggle({
    Name = "Auto Farm Level",
    CurrentValue = false,
@@ -534,7 +549,7 @@ FarmTab:CreateSlider({
 
 FarmTab:CreateSlider({
    Name = "Fly Speed",
-   Range = {40, 150},
+   Range = {40, 120},
    Increment = 10,
    Suffix = "studs/s",
    CurrentValue = 80,
@@ -543,21 +558,18 @@ FarmTab:CreateSlider({
 })
 
 FarmTab:CreateToggle({
-   Name = "Gom Quái (Bring Mobs)",
+   Name = "Gom Quái",
    CurrentValue = false,
    Flag = "BringMobs",
    Callback = function(Value) _G.BringMobs = Value end,
 })
 
--- BOSS TAB
 BossTab:CreateDropdown({
    Name = "Chọn Boss",
    Options = {"The Gorilla King", "Bobby", "The Saw", "Yeti", "Mob Leader", "Vice Admiral", "Warden", "Chief Warden", "Swan", "Magma Admiral", "Fishman Lord", "Wysper", "Thunder God", "Cyborg", "Ice Admiral", "Greybeard"},
    CurrentOption = {"The Gorilla King"},
    Flag = "SelectBoss",
-   Callback = function(Option)
-       _G.SelectBoss = Option[1]
-   end,
+   Callback = function(Option) _G.SelectBoss = Option[1] end,
 })
 
 BossTab:CreateToggle({
@@ -570,7 +582,6 @@ BossTab:CreateToggle({
    end,
 })
 
--- SETTINGS TAB
 SettingsTab:CreateToggle({
    Name = "Auto Far Attack",
    CurrentValue = true,
@@ -614,4 +625,4 @@ SettingsTab:CreateToggle({
 })
 
 Rayfield:LoadConfiguration()
-print("[MANGO HUB] 🥭 V25 Loaded. Boss Farm & Coordinates Fixed.")
+print("[MANGO HUB] 🥭 V26 Loaded. Anti Snapback & Clean Logic.")
