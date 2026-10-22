@@ -1,5 +1,5 @@
 -- ============================================================
--- MANGO HUB 🥭 - V39 (Safe Tween Noclip)
+-- MANGO HUB 🥭 - V40 (No Quest Check Teleport + SafeFly)
 -- Yêu cầu executor: cloneref, bit32, sethiddenproperty
 -- ============================================================
 
@@ -64,7 +64,7 @@ local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
 local Window = Rayfield:CreateWindow({
    Name = "MANGO HUB 🥭",
-   LoadingTitle = "Mango Hub V39",
+   LoadingTitle = "Mango Hub V40",
    LoadingSubtitle = "by AI",
    ConfigurationSaving = { Enabled = false },
    KeySystem = false,
@@ -687,4 +687,4 @@ SettingsTab:CreateToggle({
 })
 
 Rayfield:LoadConfiguration()
-print("[MANGO HUB] 🥭 V39 Loaded. Safe Tween Noclip.")
+print("[MANGO HUB] 🥭 V40 Loaded. No Quest Check Teleport + SafeFly.")
