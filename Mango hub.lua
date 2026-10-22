@@ -1,5 +1,5 @@
 -- ============================================================
--- MANGO HUB 🥭 - V45 (Direct Server Quest + BodyPosition Fly)
+-- MANGO HUB 🥭 - V46 (Tiếng Việt + Luôn Đánh + Bay Chậm)
 -- By Minh Hub
 -- Yêu cầu executor: cloneref, bit32, sethiddenproperty
 -- ============================================================
@@ -17,31 +17,31 @@ local RE_Hit    = Net:WaitForChild("RE/RegisterHit")
 local CommF     = ReplicatedStorage.Remotes.CommF_
 
 -- ============================================================
--- CONFIG
+-- CẤU HÌNH
 -- ============================================================
-_G.AutoFarAttack   = true
-_G.AutoFarmLevel   = false
-_G.AutoFarmBoss    = false
-_G.SelectBoss      = "The Gorilla King"
-_G.FarAttackRadius = 60
-_G.FarAttackDelay  = 0.05
-_G.WeaponType      = "Melee"
-_G.UseBypass       = true
-_G.MobHoverHeight  = 5
-_G.FlySpeed        = 100
-_G.BringMobs       = false
+_G.TuDanhXa       = true     -- Luôn bật mặc định
+_G.TuDongCayCap   = false
+_G.TuDongDanhBoss = false
+_G.ChonBoss       = "The Gorilla King"
+_G.BanKinhDanh    = 60
+_G.TocDoDanh      = 0.05
+_G.LoaiVuKhi      = "Melee"
+_G.DungBypass     = true
+_G.DoCaoLoLung    = 5
+_G.TocDoBay       = 50     -- Bay chậm an toàn
+_G.GomQuai        = false
 
--- State
+-- Biến trạng thái
 local _hasQuest = false
 local _questMissingTime = 0
 local _lastQuestTime = 0
 local _targetCF = nil
 local Mon, NameMon, NameQuest, QuestLv, CFrameQ, CFrameMon
 
--- Movers
+-- Body Movers
 local bp, bg
 
--- Boss Data
+-- Dữ liệu Boss
 local BossData = {
     ["The Gorilla King"] = CFrame.new(-1088.75, 8.13, -488.55),
     ["Bobby"]            = CFrame.new(-1087.37, 46.94, 4040.14),
@@ -62,7 +62,7 @@ local BossData = {
 }
 
 -- ============================================================
--- RAYFIELD UI
+-- GIAO DIỆN RAYFIELD (TIẾNG VIỆT)
 -- ============================================================
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
@@ -74,12 +74,12 @@ local Window = Rayfield:CreateWindow({
    KeySystem = false,
 })
 
-local FarmTab = Window:CreateTab("Farming 🥭", 4483362458)
-local BossTab = Window:CreateTab("Boss Farm 👹", 4483362458)
-local SettingsTab = Window:CreateTab("Settings ⚙️", 4483362458)
+local TabCayCap = Window:CreateTab("Cày Cấp 🥭", 4483362458)
+local TabBoss = Window:CreateTab("Đánh Boss 👹", 4483362458)
+local TabCaiDat = Window:CreateTab("Cài Đặt ⚙️", 4483362458)
 
 -- ============================================================
--- SIGNED REMOTE SCAN
+-- QUÉT REMOTE BYPASS
 -- ============================================================
 local signedRemote, signedId
 for _, container in ipairs({
@@ -100,7 +100,7 @@ for _, container in ipairs({
 end
 
 -- ============================================================
--- ANTI-AFK
+-- CHỐNG AFK
 -- ============================================================
 LP.Idled:Connect(function()
     VirtualUser:Button2Down(Vector2.new(0, 0), workspace.CurrentCamera.CFrame)
@@ -109,7 +109,7 @@ LP.Idled:Connect(function()
 end)
 
 -- ============================================================
--- HELPERS
+-- HÀM HỖ TRỢ
 -- ============================================================
 local function getWeapon()
     local char = LP.Character
@@ -117,20 +117,20 @@ local function getWeapon()
     local eq = char:FindFirstChildOfClass("Tool")
     if eq then
         local tip = eq.ToolTip
-        if (_G.WeaponType == "Melee" and tip == "Melee")
-        or (_G.WeaponType == "Sword" and tip == "Sword")
-        or (_G.WeaponType == "Blox Fruit" and tip == "Blox Fruit")
-        or (_G.WeaponType == "Gun" and tip == "Gun") then
+        if (_G.LoaiVuKhi == "Melee" and tip == "Melee")
+        or (_G.LoaiVuKhi == "Sword" and tip == "Sword")
+        or (_G.LoaiVuKhi == "Blox Fruit" and tip == "Blox Fruit")
+        or (_G.LoaiVuKhi == "Gun" and tip == "Gun") then
             return eq
         end
     end
     for _, t in ipairs(LP.Backpack:GetChildren()) do
         if t:IsA("Tool") then
             local tip = t.ToolTip
-            if (_G.WeaponType == "Melee" and tip == "Melee")
-            or (_G.WeaponType == "Sword" and tip == "Sword")
-            or (_G.WeaponType == "Blox Fruit" and tip == "Blox Fruit")
-            or (_G.WeaponType == "Gun" and tip == "Gun") then
+            if (_G.LoaiVuKhi == "Melee" and tip == "Melee")
+            or (_G.LoaiVuKhi == "Sword" and tip == "Sword")
+            or (_G.LoaiVuKhi == "Blox Fruit" and tip == "Blox Fruit")
+            or (_G.LoaiVuKhi == "Gun" and tip == "Gun") then
                 return t
             end
         end
@@ -265,7 +265,7 @@ function CheckLevel()
 end
 
 -- ============================================================
--- SCAN + FIRE
+-- QUÉT & BẮN HIT
 -- ============================================================
 local function scanTargets(radius)
     local char = LP.Character
@@ -304,7 +304,7 @@ end
 
 local function fireHit(head, list)
     if not head or #list == 0 then return end
-    if signedRemote and signedId and _G.UseBypass then
+    if signedRemote and signedId and _G.DungBypass then
         pcall(function()
             local fakeName = string.gsub("RE/RegisterHit", ".", function(ch)
                 return string.char(bit32.bxor(string.byte(ch), math.floor(workspace:GetServerTimeNow() / 10 % 10) + 1))
@@ -323,11 +323,11 @@ local function fireHit(head, list)
 end
 
 -- ============================================================
--- ATTACK LOOP
+-- VÒNG LẶP ĐÁNH (LUÔN LUÔN BẬT)
 -- ============================================================
 task.spawn(function()
-    while task.wait(_G.FarAttackDelay) do
-        if not (_G.AutoFarAttack or _G.AutoFarmLevel or _G.AutoFarmBoss) then continue end
+    while task.wait(_G.TocDoDanh) do
+        if not _G.TuDanhXa and not _G.TuDongCayCap and not _G.TuDongDanhBoss then continue end
 
         local char = LP.Character
         if not char then continue end
@@ -338,10 +338,10 @@ task.spawn(function()
         if w then equipWeapon(w) end
         AutoHaki()
 
-        local list, head = scanTargets(_G.FarAttackRadius)
+        local list, head = scanTargets(_G.BanKinhDanh)
         if #list == 0 then continue end
 
-        if _G.BringMobs then
+        if _G.GomQuai then
             local hrp = char:FindFirstChild("HumanoidRootPart")
             if hrp then
                 local gatherPos = CFrame.new(hrp.Position.X, hrp.Position.Y - 3, hrp.Position.Z)
@@ -370,11 +370,11 @@ task.spawn(function()
 end)
 
 -- ============================================================
--- FARM LOOP (Direct StartQuest + BodyPosition Fly)
+-- VÒNG LẶP CÀY CẤP / BOSS
 -- ============================================================
 task.spawn(function()
     while task.wait(0.1) do
-        if not (_G.AutoFarmLevel or _G.AutoFarmBoss) then
+        if not (_G.TuDongCayCap or _G.TuDongDanhBoss) then
             _hasQuest = false
             _questMissingTime = 0
             _targetCF = nil
@@ -388,9 +388,9 @@ task.spawn(function()
         if not hum or not hrp or hum.Health <= 0 then continue end
 
         pcall(function()
-            -- CHẾ ĐỘ 1: FARM BOSS
-            if _G.AutoFarmBoss then
-                local bossName = _G.SelectBoss
+            -- CHẾ ĐỘ BOSS
+            if _G.TuDongDanhBoss then
+                local bossName = _G.ChonBoss
                 local targetBoss = nil
                 
                 local enemies = Workspace:FindFirstChild("Enemies")
@@ -404,18 +404,18 @@ task.spawn(function()
                 end
 
                 if targetBoss then
-                    _targetCF = CFrame.new(targetBoss.HumanoidRootPart.Position.X, targetBoss.HumanoidRootPart.Position.Y + _G.MobHoverHeight, targetBoss.HumanoidRootPart.Position.Z)
+                    _targetCF = CFrame.new(targetBoss.HumanoidRootPart.Position.X, targetBoss.HumanoidRootPart.Position.Y + _G.DoCaoLoLung, targetBoss.HumanoidRootPart.Position.Z)
                 else
                     local spawnCF = BossData[bossName]
                     if spawnCF then
-                        _targetCF = CFrame.new(spawnCF.X, spawnCF.Y + _G.MobHoverHeight, spawnCF.Z)
+                        _targetCF = CFrame.new(spawnCF.X, spawnCF.Y + _G.DoCaoLoLung, spawnCF.Z)
                     end
                 end
                 return
             end
 
-            -- CHẾ ĐỘ 2: FARM LEVEL
-            if _G.AutoFarmLevel then
+            -- CHẾ ĐỘ CÀY CẤP
+            if _G.TuDongCayCap then
                 CheckLevel()
                 if not Mon then return end
 
@@ -424,7 +424,6 @@ task.spawn(function()
                     questVisible = LP.PlayerGui.Main.Quest.Visible
                 end)
 
-                -- Khóa Quest
                 if questVisible then
                     _hasQuest = true
                     _questMissingTime = 0
@@ -439,17 +438,15 @@ task.spawn(function()
                     end
                 end
 
-                -- Chưa có Quest -> Dùng StartQuest Server-Side (Không bay về NPC)
                 if not _hasQuest then
                     if tick() - _lastQuestTime > 2 then
                         _lastQuestTime = tick()
                         CommF:InvokeServer("StartQuest", NameQuest, QuestLv)
                     end
-                    _targetCF = CFrame.new(CFrameMon.X, CFrameMon.Y + _G.MobHoverHeight, CFrameMon.Z)
+                    _targetCF = CFrame.new(CFrameMon.X, CFrameMon.Y + _G.DoCaoLoLung, CFrameMon.Z)
                     return
                 end
 
-                -- Đang có Quest -> Bay tới quái
                 local enemies = Workspace:FindFirstChild("Enemies")
                 local targetMob, nearestDist = nil, math.huge
                 if enemies then
@@ -468,9 +465,9 @@ task.spawn(function()
                 end
 
                 if targetMob then
-                    _targetCF = CFrame.new(targetMob.HumanoidRootPart.Position.X, targetMob.HumanoidRootPart.Position.Y + _G.MobHoverHeight, targetMob.HumanoidRootPart.Position.Z)
+                    _targetCF = CFrame.new(targetMob.HumanoidRootPart.Position.X, targetMob.HumanoidRootPart.Position.Y + _G.DoCaoLoLung, targetMob.HumanoidRootPart.Position.Z)
                 else
-                    _targetCF = CFrame.new(CFrameMon.X, CFrameMon.Y + _G.MobHoverHeight, CFrameMon.Z)
+                    _targetCF = CFrame.new(CFrameMon.X, CFrameMon.Y + _G.DoCaoLoLung, CFrameMon.Z)
                 end
             end
         end)
@@ -478,10 +475,10 @@ task.spawn(function()
 end)
 
 -- ============================================================
--- MOVEMENT LOOP (BodyPosition - Bay mượt không rung)
+-- VÒNG LẶP DI CHUYỂN (BodyPosition - Bay Chậm)
 -- ============================================================
 RunService.Heartbeat:Connect(function()
-    if not (_G.AutoFarmLevel or _G.AutoFarmBoss) then
+    if not (_G.TuDongCayCap or _G.TuDongDanhBoss) then
         if bp then bp:Destroy(); bp = nil end
         if bg then bg:Destroy(); bg = nil end
         return
@@ -492,7 +489,7 @@ RunService.Heartbeat:Connect(function()
     local hrp = char:FindFirstChild("HumanoidRootPart")
     if not hrp then return end
 
-    -- Noclip
+    -- Xuyên vật cản
     for _, v in ipairs(char:GetDescendants()) do
         if v:IsA("BasePart") and v.CanCollide then
             v.CanCollide = false
@@ -501,7 +498,6 @@ RunService.Heartbeat:Connect(function()
 
     if not _targetCF then return end
 
-    -- Khởi tạo BodyPosition & BodyGyro
     if not bp or bp.Parent ~= hrp then
         if bp then bp:Destroy() end
         bp = Instance.new("BodyPosition")
@@ -524,112 +520,123 @@ RunService.Heartbeat:Connect(function()
 
     local dist = (hrp.Position - _targetCF.Position).Magnitude
     if dist > 3 then
-        -- Nếu xa quá 2000 studs, dịch chuyển nhẹ 1 đoạn để tránh BodyPosition kéo văng
         if dist > 2000 then
             hrp.CFrame = CFrame.new(hrp.Position + (_targetCF.Position - hrp.Position).Unit * 1500)
             dist = 500
         end
-        bp.Position = _targetCF.Position
+        -- Bay chậm bằng cách giới hạn vị trí đích
+        local dir = (_targetCF.Position - hrp.Position).Unit
+        local step = _G.TocDoBay * RunService.Heartbeat:Wait()
+        bp.Position = hrp.Position + dir * math.min(step, dist)
         bg.CFrame = _targetCF
     else
-        -- Đã tới nơi -> Ghim chặt
         bp.Position = _targetCF.Position
         bg.CFrame = _targetCF
     end
 end)
 
 -- ============================================================
--- RAYFIELD UI CONFIG
+-- GIAO DIỆN CẤU HÌNH
 -- ============================================================
-FarmTab:CreateToggle({
-   Name = "Auto Farm Level",
+TabCayCap:CreateToggle({
+   Name = "Tự Động Cày Cấp",
    CurrentValue = false,
-   Flag = "AutoFarmLevel",
+   Flag = "TuDongCayCap",
    Callback = function(Value)
-       _G.AutoFarmLevel = Value
-       if Value then _G.AutoFarmBoss = false end
+       _G.TuDongCayCap = Value
+       if Value then _G.TuDongDanhBoss = false end
        _hasQuest = false
        _questMissingTime = 0
        _targetCF = nil
    end,
 })
 
-FarmTab:CreateSlider({
-   Name = "Hover Height (Mob)",
+TabCayCap:CreateSlider({
+   Name = "Độ Cao Lơ Lửng",
    Range = {3, 20},
    Increment = 1,
    Suffix = "studs",
    CurrentValue = 5,
-   Flag = "MobHoverHeight",
-   Callback = function(Value) _G.MobHoverHeight = Value end,
+   Flag = "DoCaoLoLung",
+   Callback = function(Value) _G.DoCaoLoLung = Value end,
 })
 
-FarmTab:CreateToggle({
+TabCayCap:CreateSlider({
+   Name = "Tốc Độ Bay",
+   Range = {30, 150},
+   Increment = 10,
+   Suffix = "studs/s",
+   CurrentValue = 50,
+   Flag = "TocDoBay",
+   Callback = function(Value) _G.TocDoBay = Value end,
+})
+
+TabCayCap:CreateToggle({
    Name = "Gom Quái",
    CurrentValue = false,
-   Flag = "BringMobs",
-   Callback = function(Value) _G.BringMobs = Value end,
+   Flag = "GomQuai",
+   Callback = function(Value) _G.GomQuai = Value end,
 })
 
-BossTab:CreateDropdown({
+TabBoss:CreateDropdown({
    Name = "Chọn Boss",
    Options = {"The Gorilla King", "Bobby", "The Saw", "Yeti", "Mob Leader", "Vice Admiral", "Warden", "Chief Warden", "Swan", "Magma Admiral", "Fishman Lord", "Wysper", "Thunder God", "Cyborg", "Ice Admiral", "Greybeard"},
    CurrentOption = {"The Gorilla King"},
-   Flag = "SelectBoss",
-   Callback = function(Option) _G.SelectBoss = Option[1] end,
+   Flag = "ChonBoss",
+   Callback = function(Option) _G.ChonBoss = Option[1] end,
 })
 
-BossTab:CreateToggle({
-   Name = "Auto Farm Boss",
+TabBoss:CreateToggle({
+   Name = "Tự Động Đánh Boss",
    CurrentValue = false,
-   Flag = "AutoFarmBoss",
+   Flag = "TuDongDanhBoss",
    Callback = function(Value)
-       _G.AutoFarmBoss = Value
-       if Value then _G.AutoFarmLevel = false end
+       _G.TuDongDanhBoss = Value
+       if Value then _G.TuDongCayCap = false end
        _targetCF = nil
    end,
 })
 
-SettingsTab:CreateToggle({
-   Name = "Auto Far Attack",
+TabCaiDat:CreateToggle({
+   Name = "Tự Đánh Xa (Luôn Bật)",
    CurrentValue = true,
-   Flag = "AutoFarAttack",
-   Callback = function(Value) _G.AutoFarAttack = Value end,
+   Flag = "TuDanhXa",
+   Callback = function(Value) _G.TuDanhXa = Value end,
 })
 
-SettingsTab:CreateSlider({
-   Name = "Attack Radius",
+TabCaiDat:CreateSlider({
+   Name = "Bán Kính Đánh",
    Range = {20, 200},
    Increment = 5,
    Suffix = "studs",
    CurrentValue = 60,
-   Flag = "FarAttackRadius",
-   Callback = function(Value) _G.FarAttackRadius = Value end,
+   Flag = "BanKinhDanh",
+   Callback = function(Value) _G.BanKinhDanh = Value end,
 })
 
-SettingsTab:CreateSlider({
-   Name = "Attack Delay",
+TabCaiDat:CreateSlider({
+   Name = "Tốc Độ Đánh",
    Range = {0.01, 1},
    Increment = 0.01,
    Suffix = "s",
    CurrentValue = 0.05,
-   Flag = "FarAttackDelay",
-   Callback = function(Value) _G.FarAttackDelay = Value end,
+   Flag = "TocDoDanh",
+   Callback = function(Value) _G.TocDoDanh = Value end,
 })
 
-SettingsTab:CreateDropdown({
-   Name = "Weapon Type",
+TabCaiDat:CreateDropdown({
+   Name = "Loại Vũ Khí",
    Options = {"Melee", "Sword", "Blox Fruit", "Gun"},
    CurrentOption = {"Melee"},
-   Flag = "WeaponType",
-   Callback = function(Option) _G.WeaponType = Option[1] end,
+   Flag = "LoaiVuKhi",
+   Callback = function(Option) _G.LoaiVuKhi = Option[1] end,
 })
 
-SettingsTab:CreateToggle({
-   Name = "Use Bypass",
+TabCaiDat:CreateToggle({
+   Name = "Dùng Bypass",
    CurrentValue = true,
-   Flag = "UseBypass",
-   Callback = function(Value) _G.UseBypass = Value end,
+   Flag = "DungBypass",
+   Callback = function(Value) _G.DungBypass = Value end,
 })
 
 Rayfield:LoadConfiguration()
