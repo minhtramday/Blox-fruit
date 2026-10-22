@@ -1,7 +1,6 @@
 -- ============================================================
--- MANGO HUB 🥭 - V27 (True Physics Noclip + Lag-free Quest)
+-- MANGO HUB 🥭 - V28 (No Vertical Snapback + Exact Mob Filter)
 -- Yêu cầu executor: cloneref, bit32, sethiddenproperty
--- Đã sửa: Dùng CFrame + HumanoidState.Physics để xuyên mọi vật cản.
 -- ============================================================
 
 local Players           = game:GetService("Players")
@@ -36,7 +35,6 @@ local _targetCF = nil
 local _isStartingQuest = false
 local Mon, NameMon, NameQuest, QuestLv, CFrameQ, CFrameMon
 
--- Boss Data (Sea 1)
 local BossData = {
     ["The Gorilla King"] = CFrame.new(-1088.75, 8.13, -488.55),
     ["Bobby"]            = CFrame.new(-1087.37, 46.94, 4040.14),
@@ -63,7 +61,7 @@ local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
 local Window = Rayfield:CreateWindow({
    Name = "MANGO HUB 🥭",
-   LoadingTitle = "Mango Hub V27",
+   LoadingTitle = "Mango Hub V28",
    LoadingSubtitle = "by AI",
    ConfigurationSaving = { Enabled = false },
    KeySystem = false,
@@ -149,7 +147,7 @@ local function AutoHaki()
 end
 
 -- ============================================================
--- CHECK LEVEL (Đã cập nhật Y chuẩn từ Scanner)
+-- CHECK LEVEL (Đã cập nhật Y chuẩn)
 -- ============================================================
 function CheckLevel()
     local lvl = LP.Data.Level.Value
@@ -235,7 +233,6 @@ function CheckLevel()
             CFrameQ=CFrame.new(5259.82,37.35,4050.03); CFrameMon=CFrame.new(5441.95, 42.50, 4950.09)
         end
     elseif place == 4442272183 or place == 79091703265657 then
-        -- Rút gọn Sea 2
         if lvl <= 724 then
             Mon="Raider"; NameMon="Raider"; NameQuest="Area1Quest"; QuestLv=1
             CFrameQ=CFrame.new(-429.54,71.77,1836.18); CFrameMon=CFrame.new(-728.33, 52.78, 2345.77)
@@ -250,7 +247,6 @@ function CheckLevel()
             CFrameQ=CFrame.new(632.70,73.11,918.67); CFrameMon=CFrame.new(73.08, 81.86, -27.47)
         end
     else
-        -- Rút gọn Sea 3
         if lvl <= 1524 then
             Mon="Pirate Millionaire"; NameMon="Pirate Millionaire"; NameQuest="PiratePortQuest"; QuestLv=1
             CFrameQ=CFrame.new(-450.10,107.68,5950.73); CFrameMon=CFrame.new(-245.99, 47.31, 5584.10)
@@ -376,7 +372,7 @@ task.spawn(function()
 end)
 
 -- ============================================================
--- FARM LOOP
+-- FARM LOOP (ĐÃ SỬA: Lọc chính xác, sắp xếp khoảng cách)
 -- ============================================================
 task.spawn(function()
     while task.wait(0.1) do
@@ -439,19 +435,25 @@ task.spawn(function()
                     if xzDist < 15 and not _isStartingQuest then
                         _isStartingQuest = true
                         ReplicatedStorage.Remotes.CommF_:InvokeServer("StartQuest", NameQuest, QuestLv)
-                        task.delay(1.5, function() _isStartingQuest = false end)
+                        task.delay(3, function() _isStartingQuest = false end)
                     end
                     return
                 end
 
-                -- Đã có Quest -> Tìm quái
-                local targetMob = nil
+                -- Đã có Quest -> Tìm quái (Lọc chính xác + sắp xếp gần nhất)
                 local enemies = Workspace:FindFirstChild("Enemies")
+                local targetMob, nearestDist = nil, math.huge
                 if enemies then
-                    for _, v in pairs(enemies:GetChildren()) do
-                        if string.find(v.Name, Mon) and v:FindFirstChild("Humanoid") and v:FindFirstChild("HumanoidRootPart") and v.Humanoid.Health > 0 then
-                            targetMob = v
-                            break
+                    for _, v in ipairs(enemies:GetChildren()) do
+                        if v.Name == Mon 
+                        and v:FindFirstChild("Humanoid") 
+                        and v:FindFirstChild("HumanoidRootPart") 
+                        and v.Humanoid.Health > 0 then
+                            local d = (v.HumanoidRootPart.Position - hrp.Position).Magnitude
+                            if d < nearestDist then
+                                nearestDist = d
+                                targetMob = v
+                            end
                         end
                     end
                 end
@@ -467,7 +469,7 @@ task.spawn(function()
 end)
 
 -- ============================================================
--- MOVEMENT LOOP (CFrame + Humanoid.Physics)
+-- MOVEMENT LOOP (Không ép Y khi bay ngang, chỉ hạ Y khi tới nơi)
 -- ============================================================
 RunService.Heartbeat:Connect(function(dt)
     if not (_G.AutoFarmLevel or _G.AutoFarmBoss) then return end
@@ -475,13 +477,9 @@ RunService.Heartbeat:Connect(function(dt)
     local char = LP.Character
     if not char then return end
     local hrp = char:FindFirstChild("HumanoidRootPart")
-    local hum = char:FindFirstChild("Humanoid")
-    if not hrp or not hum then return end
+    if not hrp then return end
 
-    -- Ép Humanoid sang trạng thái Physics để bỏ qua va chạm vật lý
-    hum:ChangeState(Enum.HumanoidStateType.Physics)
-
-    -- Bật Noclip liên tục
+    -- Noclip
     for _, v in ipairs(char:GetDescendants()) do
         if v:IsA("BasePart") and v.CanCollide then
             v.CanCollide = false
@@ -490,20 +488,30 @@ RunService.Heartbeat:Connect(function(dt)
 
     if not _targetCF then return end
 
-    -- Di chuyển CFrame
     local curPos = hrp.Position
     local targetPos = _targetCF.Position
     local delta = targetPos - curPos
-    local dist = delta.Magnitude
+    local horizDelta = Vector3.new(delta.X, 0, delta.Z)
+    local horizDist = horizDelta.Magnitude
 
-    if dist > 2 then
-        local moveDist = _G.FlySpeed * dt
-        if moveDist > dist then moveDist = dist end
-        local dir = delta.Unit
-        local newPos = curPos + dir * moveDist
-        hrp.CFrame = CFrame.new(Vector3.new(newPos.X, targetPos.Y, newPos.Z), Vector3.new(newPos.X, targetPos.Y, newPos.Z) + hrp.CFrame.LookVector)
+    if horizDist > 3 then
+        -- Bay ngang bằng Y hiện tại (không bị snapback)
+        local moveDist = math.min(_G.FlySpeed * dt, horizDist)
+        local newXZ = curPos + horizDelta.Unit * moveDist
+        
+        -- Giữ nguyên Y hiện tại
+        hrp.CFrame = CFrame.lookAt(Vector3.new(newXZ.X, curPos.Y, newXZ.Z), Vector3.new(newXZ.X, curPos.Y, newXZ.Z) + horizDelta.Unit)
     else
-        hrp.CFrame = CFrame.new(targetPos)
+        -- Đã ở ngay trên đầu target -> Hạ Y từ từ (giống thang máy)
+        local vertDist = targetPos.Y - curPos.Y
+        if math.abs(vertDist) > 1 then
+            local moveY = math.sign(vertDist) * math.min(_G.FlySpeed * dt, math.abs(vertDist))
+            local newY = curPos.Y + moveY
+            hrp.CFrame = CFrame.new(curPos.X, newY, curPos.Z) * hrp.CFrame.Rotation
+        else
+            -- Đã tới đích hoàn toàn
+            hrp.CFrame = CFrame.new(targetPos) * hrp.CFrame.Rotation
+        end
     end
 end)
 
@@ -608,4 +616,4 @@ SettingsTab:CreateToggle({
 })
 
 Rayfield:LoadConfiguration()
-print("[MANGO HUB] 🥭 V27 Loaded. CFrame + Physics Noclip.")
+print("[MANGO HUB] 🥭 V28 Loaded. No Vertical Snapback + Exact Mob Filter.")
