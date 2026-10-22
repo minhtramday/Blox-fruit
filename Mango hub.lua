@@ -585,4 +585,54 @@ BossTab:CreateDropdown({
 BossTab:CreateToggle({
    Name = "Auto Farm Boss",
    CurrentValue = false,
-   Flag = "
+   Flag = "AutoFarmBoss",
+   Callback = function(Value)
+       _G.AutoFarmBoss = Value
+       if Value then _G.AutoFarmLevel = false end
+   end,
+})
+
+SettingsTab:CreateToggle({
+   Name = "Auto Far Attack",
+   CurrentValue = true,
+   Flag = "AutoFarAttack",
+   Callback = function(Value) _G.AutoFarAttack = Value end,
+})
+
+SettingsTab:CreateSlider({
+   Name = "Attack Radius",
+   Range = {20, 200},
+   Increment = 5,
+   Suffix = "studs",
+   CurrentValue = 60,
+   Flag = "FarAttackRadius",
+   Callback = function(Value) _G.FarAttackRadius = Value end,
+})
+
+SettingsTab:CreateSlider({
+   Name = "Attack Delay",
+   Range = {0.01, 1},
+   Increment = 0.01,
+   Suffix = "s",
+   CurrentValue = 0.05,
+   Flag = "FarAttackDelay",
+   Callback = function(Value) _G.FarAttackDelay = Value end,
+})
+
+SettingsTab:CreateDropdown({
+   Name = "Weapon Type",
+   Options = {"Melee", "Sword", "Blox Fruit", "Gun"},
+   CurrentOption = {"Melee"},
+   Flag = "WeaponType",
+   Callback = function(Option) _G.WeaponType = Option[1] end,
+})
+
+SettingsTab:CreateToggle({
+   Name = "Use Bypass",
+   CurrentValue = true,
+   Flag = "UseBypass",
+   Callback = function(Value) _G.UseBypass = Value end,
+})
+
+Rayfield:LoadConfiguration()
+print("[MANGO HUB] 🥭 V29 Loaded. World Origin TP + Orbit Fly.")
