@@ -1,7 +1,7 @@
 -- ============================================================
--- MANGO HUB 🥭 - Rayfield UI + Hover Farm (V16 Modified)
+-- MANGO HUB 🥭 - Rayfield UI + Hover Farm (V16 Fix Fly)
 -- Yêu cầu executor: cloneref, bit32, sethiddenproperty
--- Đã sửa: Noclip xuyên tường, BodyVelocity giới hạn tốc độ.
+-- Đã sửa: Dùng Heartbeat + CFrame xuyên vật cản, tốc độ chuẩn.
 -- ============================================================
 
 local Players           = game:GetService("Players")
@@ -26,16 +26,13 @@ _G.WeaponType      = "Melee"
 _G.UseBypass       = true
 _G.MobHoverHeight  = 5
 _G.NPCHoverOffset  = 5
-_G.FlySpeed        = 80   -- Tốc độ bay (studs/s) - An toàn
+_G.FlySpeed        = 80   -- Tốc độ bay (studs/s)
 _G.BringMobs       = false
 
 -- State
 local _targetCF = nil
 local _isStartingQuest = false
 local Mon, NameMon, NameQuest, QuestLv, CFrameQ, CFrameMon
-
--- Body Movers
-local bp, bg, bv
 
 -- ============================================================
 -- RAYFIELD UI
@@ -81,20 +78,6 @@ LP.Idled:Connect(function()
     VirtualUser:Button2Down(Vector2.new(0, 0), workspace.CurrentCamera.CFrame)
     task.wait(1)
     VirtualUser:Button2Up(Vector2.new(0, 0), workspace.CurrentCamera.CFrame)
-end)
-
--- ============================================================
--- NOCLIP (Xuyên vật cản)
--- ============================================================
-RunService.Stepped:Connect(function()
-    if not _G.AutoFarmLevel then return end
-    local char = LP.Character
-    if not char then return end
-    for _, v in ipairs(char:GetDescendants()) do
-        if v:IsA("BasePart") and v.CanCollide then
-            v.CanCollide = false
-        end
-    end
 end)
 
 -- ============================================================
@@ -480,9 +463,6 @@ task.spawn(function()
         if not _G.AutoFarmLevel then
             _targetCF = nil
             _isStartingQuest = false
-            if bp then bp:Destroy(); bp = nil end
-            if bg then bg:Destroy(); bg = nil end
-            if bv then bv:Destroy(); bv = nil end
             continue
         end
 
@@ -531,10 +511,8 @@ task.spawn(function()
             end
 
             if targetMob then
-                -- Bay tới đầu quái (Không cộng Y ảo, dùng đúng vị trí)
                 _targetCF = CFrame.new(targetMob.HumanoidRootPart.Position.X, targetMob.HumanoidRootPart.Position.Y + _G.MobHoverHeight, targetMob.HumanoidRootPart.Position.Z)
             else
-                -- Không có quái -> Bay tới CFrameMon chờ spawn
                 _targetCF = CFrame.new(CFrameMon.X, CFrameMon.Y + _G.MobHoverHeight, CFrameMon.Z)
             end
         end)
@@ -542,70 +520,42 @@ task.spawn(function()
 end)
 
 -- ============================================================
--- MOVEMENT LOOP (BodyVelocity XZ + BodyPosition Y)
+-- MOVEMENT & NOCLIP LOOP (Heartbeat + CFrame trực tiếp)
 -- ============================================================
-task.spawn(function()
-    while task.wait() do
-        if not _G.AutoFarmLevel then
-            if bp then bp:Destroy(); bp = nil end
-            if bg then bg:Destroy(); bg = nil end
-            if bv then bv:Destroy(); bv = nil end
-            task.wait(0.5)
-            continue
+RunService.Heartbeat:Connect(function(dt)
+    if not _G.AutoFarmLevel or not _targetCF then return end
+
+    local char = LP.Character
+    if not char then return end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+
+    -- 1. Noclip (Xuyên vật cản)
+    for _, v in ipairs(char:GetDescendants()) do
+        if v:IsA("BasePart") and v.CanCollide then
+            v.CanCollide = false
         end
+    end
 
-        local char = LP.Character
-        if not char then continue end
-        local hrp = char:FindFirstChild("HumanoidRootPart")
-        local hum = char:FindFirstChild("Humanoid")
-        if not hrp or not hum then continue end
-        if not _targetCF then continue end
+    -- 2. Di chuyển bằng CFrame (Bỏ qua vật lý)
+    local curPos = hrp.Position
+    local targetPos = _targetCF.Position
+    local delta = targetPos - curPos
+    local dist = delta.Magnitude
 
-        -- BodyPosition (Chỉ trục Y, chống rớt)
-        if not bp or bp.Parent ~= hrp then
-            if bp then bp:Destroy() end
-            bp = Instance.new("BodyPosition")
-            bp.MaxForce = Vector3.new(0, math.huge, 0)
-            bp.P = 10000
-            bp.D = 500
-            bp.Position = hrp.Position
-            bp.Parent = hrp
-        end
-
-        -- BodyVelocity (Chỉ trục XZ, giới hạn tốc độ)
-        if not bv or bv.Parent ~= hrp then
-            if bv then bv:Destroy() end
-            bv = Instance.new("BodyVelocity")
-            bv.MaxForce = Vector3.new(math.huge, 0, math.huge)
-            bv.Velocity = Vector3.zero
-            bv.Parent = hrp
-        end
-
-        -- BodyGyro (Giữ hướng)
-        if not bg or bg.Parent ~= hrp then
-            if bg then bg:Destroy() end
-            bg = Instance.new("BodyGyro")
-            bg.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
-            bg.P = 10000
-            bg.D = 500
-            bg.CFrame = hrp.CFrame
-            bg.Parent = hrp
-        end
-
-        local delta = _targetCF.Position - hrp.Position
-        local horizDelta = Vector3.new(delta.X, 0, delta.Z)
-        local horizDist = horizDelta.Magnitude
-
-        if horizDist > 3 then
-            -- Bay với tốc độ được set trong Config
-            bv.Velocity = horizDelta.Unit * _G.FlySpeed
-        else
-            bv.Velocity = Vector3.zero
-        end
-
-        -- Ghim trục Y cố định
-        bp.Position = Vector3.new(hrp.Position.X, _targetCF.Position.Y, hrp.Position.Z)
-        bg.CFrame = _targetCF
+    if dist > 2 then
+        -- Tính toán khoảng cách bay dựa vào tốc độ (studs/s)
+        local moveDist = _G.FlySpeed * dt
+        if moveDist > dist then moveDist = dist end
+        
+        local dir = delta.Unit
+        local newPos = curPos + dir * moveDist
+        
+        -- Gán CFrame, giữ Y cố định theo target
+        hrp.CFrame = CFrame.new(Vector3.new(newPos.X, targetPos.Y, newPos.Z), Vector3.new(newPos.X, targetPos.Y, newPos.Z) + hrp.CFrame.LookVector)
+    else
+        -- Đã tới đích, ghim chặt
+        hrp.CFrame = CFrame.new(targetPos)
     end
 end)
 
@@ -636,7 +586,7 @@ FarmTab:CreateSlider({
 
 FarmTab:CreateSlider({
    Name = "Fly Speed (studs/s)",
-   Range = {40, 120},
+   Range = {40, 150},
    Increment = 10,
    Suffix = "studs/s",
    CurrentValue = 80,
@@ -708,4 +658,4 @@ SettingsTab:CreateToggle({
 })
 
 Rayfield:LoadConfiguration()
-print("[MANGO HUB] 🥭 V16 Modified - Noclip & Speed Cap applied.")
+print("[MANGO HUB] 🥭 V16 Fix Fly - Heartbeat CFrame & Noclip applied.")
