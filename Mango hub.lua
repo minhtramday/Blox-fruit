@@ -1,7 +1,7 @@
 -- ============================================================
--- MANGO HUB 🥭 - Rayfield UI + Hover Farm (V19 - Teleport Chunk)
+-- MANGO HUB 🥭 - Rayfield UI + Hover Farm (V20 - Fix Quest Detect)
 -- Yêu cầu executor: cloneref, bit32, sethiddenproperty
--- Đã sửa: Bỏ BodyVelocity/BodyPosition, teleport chunk 5 studs/0.05s.
+-- Đã sửa: Check XZ, Y lấy trực tiếp từ target, không ChangeState.
 -- ============================================================
 
 local Players           = game:GetService("Players")
@@ -31,8 +31,6 @@ _G.BringMobs       = false
 
 -- State
 local _targetCF = nil
-local _farmY = nil
-local _currentMob = nil
 local _isStartingQuest = false
 local _noclipActive = false
 local Mon, NameMon, NameQuest, QuestLv, CFrameQ, CFrameMon
@@ -44,7 +42,7 @@ local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
 local Window = Rayfield:CreateWindow({
    Name = "MANGO HUB 🥭",
-   LoadingTitle = "Mango Hub V19",
+   LoadingTitle = "Mango Hub V20",
    LoadingSubtitle = "by AI",
    ConfigurationSaving = { Enabled = false },
    KeySystem = false,
@@ -485,14 +483,12 @@ task.spawn(function()
 end)
 
 -- ============================================================
--- FARM LOOP (Xác định target + _farmY)
+-- FARM LOOP (XZ Check, Y trực tiếp từ target)
 -- ============================================================
 task.spawn(function()
     while task.wait(0.1) do
         if not _G.AutoFarmLevel then
             _targetCF = nil
-            _farmY = nil
-            _currentMob = nil
             _isStartingQuest = false
             SetNoClip(false)
             continue
@@ -505,7 +501,6 @@ task.spawn(function()
         if not hum or not hrp or hum.Health <= 0 then continue end
 
         SetNoClip(true)
-        pcall(function() hum:ChangeState(Enum.HumanoidStateType.Physics) end)
 
         pcall(function()
             CheckLevel()
@@ -520,15 +515,17 @@ task.spawn(function()
 
             -- Chưa có Quest -> NPC
             if not questVisible then
-                _currentMob = nil
-                if not _farmY then
-                    _farmY = hrp.Position.Y + 5
-                end
-                _targetCF = CFrame.new(CFrameQ.X, _farmY, CFrameQ.Z)
-                if (hrp.Position - CFrameQ).Magnitude < 20 then
+                local npcY = CFrameQ.Y + _G.NPCHoverOffset
+                _targetCF = CFrame.new(CFrameQ.X, npcY, CFrameQ.Z)
+
+                -- Check XZ (bỏ qua Y)
+                local xzDist = (Vector2.new(hrp.Position.X, hrp.Position.Z)
+                    - Vector2.new(CFrameQ.X, CFrameQ.Z)).Magnitude
+                if xzDist < 15 then
                     _isStartingQuest = true
                     ReplicatedStorage.Remotes.CommF_:InvokeServer("StartQuest", NameQuest, QuestLv)
-                    task.delay(2, function() _isStartingQuest = false end)
+                    task.wait(1)
+                    _isStartingQuest = false
                 end
                 return
             end
@@ -546,16 +543,11 @@ task.spawn(function()
             end
 
             if targetMob then
-                -- Đổi mob mới -> update _farmY
-                if _currentMob ~= targetMob then
-                    _currentMob = targetMob
-                    _farmY = targetMob.HumanoidRootPart.Position.Y + _G.MobHoverHeight
-                end
-                _targetCF = CFrame.new(targetMob.HumanoidRootPart.Position.X, _farmY, targetMob.HumanoidRootPart.Position.Z)
+                local mobY = targetMob.HumanoidRootPart.Position.Y + _G.MobHoverHeight
+                _targetCF = CFrame.new(targetMob.HumanoidRootPart.Position.X, mobY, targetMob.HumanoidRootPart.Position.Z)
             else
-                _currentMob = nil
-                _farmY = CFrameMon.Y + _G.MobHoverHeight
-                _targetCF = CFrame.new(CFrameMon.X, _farmY, CFrameMon.Z)
+                local spawnY = CFrameMon.Y + _G.MobHoverHeight
+                _targetCF = CFrame.new(CFrameMon.X, spawnY, CFrameMon.Z)
             end
         end)
     end
@@ -566,38 +558,35 @@ end)
 -- ============================================================
 task.spawn(function()
     while task.wait(0.05) do
-        if not _G.AutoFarmLevel or not _targetCF or not _farmY then continue end
+        if not _G.AutoFarmLevel or not _targetCF then continue end
 
         local char = LP.Character
         if not char then continue end
         local hrp = char:FindFirstChild("HumanoidRootPart")
         if not hrp then continue end
 
+        local tgtY = _targetCF.Position.Y
         local curXZ = Vector3.new(hrp.Position.X, 0, hrp.Position.Z)
         local tgtXZ = Vector3.new(_targetCF.Position.X, 0, _targetCF.Position.Z)
         local delta = tgtXZ - curXZ
         local dist = delta.Magnitude
 
         if dist > 1 then
-            -- Teleport chunk 5 studs/tick (= 100 studs/s)
             local step = math.min(5, dist)
             local dir = delta.Unit
             local newXZ = curXZ + dir * step
-            hrp.CFrame = CFrame.new(Vector3.new(newXZ.X, _farmY, newXZ.Z),
-                Vector3.new(newXZ.X, _farmY, newXZ.Z) + hrp.CFrame.LookVector)
+            hrp.CFrame = CFrame.new(Vector3.new(newXZ.X, tgtY, newXZ.Z))
         else
-            -- Đã tới nơi, ghim chặt
-            hrp.CFrame = CFrame.new(Vector3.new(hrp.Position.X, _farmY, hrp.Position.Z),
-                Vector3.new(hrp.Position.X, _farmY, hrp.Position.Z) + hrp.CFrame.LookVector)
+            hrp.CFrame = CFrame.new(Vector3.new(hrp.Position.X, tgtY, hrp.Position.Z))
         end
     end
 end)
 
 -- ============================================================
--- HEARTBEAT (Ghim Y + triệt tiêu vận tốc để chống rớt)
+-- HEARTBEAT (Chống rớt)
 -- ============================================================
 RunService.Heartbeat:Connect(function()
-    if not _G.AutoFarmLevel or not _farmY then return end
+    if not _G.AutoFarmLevel or not _targetCF then return end
 
     local char = LP.Character
     if not char then return end
@@ -605,8 +594,8 @@ RunService.Heartbeat:Connect(function()
     if not hrp then return end
 
     pcall(function()
-        if math.abs(hrp.Position.Y - _farmY) > 1 then
-            hrp.CFrame = CFrame.new(hrp.Position.X, _farmY, hrp.Position.Z) * hrp.CFrame.Rotation
+        if math.abs(hrp.Position.Y - _targetCF.Position.Y) > 2 then
+            hrp.CFrame = CFrame.new(hrp.Position.X, _targetCF.Position.Y, hrp.Position.Z)
         end
         hrp.AssemblyLinearVelocity = Vector3.zero
         hrp.AssemblyAngularVelocity = Vector3.zero
@@ -622,11 +611,7 @@ FarmTab:CreateToggle({
    Flag = "AutoFarmLevel",
    Callback = function(Value)
        _G.AutoFarmLevel = Value
-       if not Value then
-           _targetCF = nil
-           _farmY = nil
-           _currentMob = nil
-       end
+       if not Value then _targetCF = nil end
    end,
 })
 
@@ -643,7 +628,7 @@ FarmTab:CreateSlider({
 })
 
 FarmTab:CreateSlider({
-   Name = "Fly Speed (studs/s)",
+   Name = "Fly Speed",
    Range = {50, 200},
    Increment = 10,
    Suffix = "studs/s",
@@ -716,4 +701,4 @@ SettingsTab:CreateToggle({
 })
 
 Rayfield:LoadConfiguration()
-print("[MANGO HUB] 🥭 V19 Loaded. Teleport chunk 5 studs/0.05s (noclip).")
+print("[MANGO HUB] 🥭 V20 Loaded. XZ check + Y direct.")
