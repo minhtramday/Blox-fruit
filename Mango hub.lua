@@ -1,7 +1,7 @@
 -- ============================================================
--- MANGO HUB 🥭 - Rayfield UI + Hover Farm (V17 - BodyVelocity Cap)
+-- MANGO HUB 🥭 - Rayfield UI + Hover Farm (V18 - NoClip + Hover)
 -- Yêu cầu executor: cloneref, bit32, sethiddenproperty
--- Đã sửa: Dùng BodyVelocity (capped 100 studs/s) thay vì BodyPosition.
+-- Đã thêm: NoClip liên tục, bay xuyên vật cản.
 -- ============================================================
 
 local Players           = game:GetService("Players")
@@ -26,12 +26,13 @@ _G.WeaponType      = "Melee"
 _G.UseBypass       = true
 _G.MobHoverHeight  = 5
 _G.NPCHoverOffset  = 5
-_G.HoverSpeed      = 100   -- studs/s (an toàn)
+_G.HoverSpeed      = 100
 _G.BringMobs       = false
 
 -- State
 local _targetCF = nil
 local _isStartingQuest = false
+local _noclipActive = false
 local Mon, NameMon, NameQuest, QuestLv, CFrameQ, CFrameMon
 
 -- Movers
@@ -44,7 +45,7 @@ local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
 local Window = Rayfield:CreateWindow({
    Name = "MANGO HUB 🥭",
-   LoadingTitle = "Mango Hub V17",
+   LoadingTitle = "Mango Hub V18",
    LoadingSubtitle = "by AI",
    ConfigurationSaving = { Enabled = false },
    KeySystem = false,
@@ -82,6 +83,33 @@ LP.Idled:Connect(function()
     task.wait(1)
     VirtualUser:Button2Up(Vector2.new(0, 0), workspace.CurrentCamera.CFrame)
 end)
+
+-- ============================================================
+-- NOCLIP (No collision) - chạy mỗi frame khi active
+-- ============================================================
+RunService.Stepped:Connect(function()
+    if not _noclipActive then return end
+    local char = LP.Character
+    if not char then return end
+    for _, v in ipairs(char:GetDescendants()) do
+        if v:IsA("BasePart") and v.CanCollide then
+            v.CanCollide = false
+        end
+    end
+end)
+
+local function SetNoClip(state)
+    _noclipActive = state
+    if state then return end
+    -- Khi tắt, khôi phục collision
+    local char = LP.Character
+    if not char then return end
+    for _, v in ipairs(char:GetDescendants()) do
+        if v:IsA("BasePart") then
+            v.CanCollide = true
+        end
+    end
+end
 
 -- ============================================================
 -- HELPERS
@@ -459,13 +487,14 @@ task.spawn(function()
 end)
 
 -- ============================================================
--- FARM LOOP (Cập nhật _targetCF)
+-- FARM LOOP
 -- ============================================================
 task.spawn(function()
     while task.wait(0.1) do
         if not _G.AutoFarmLevel then
             _targetCF = nil
             _isStartingQuest = false
+            SetNoClip(false)
             if bv then bv:Destroy(); bv = nil end
             if bp then bp:Destroy(); bp = nil end
             continue
@@ -476,6 +505,11 @@ task.spawn(function()
         local hum = char:FindFirstChildOfClass("Humanoid")
         local hrp = char:FindFirstChild("HumanoidRootPart")
         if not hum or not hrp or hum.Health <= 0 then continue end
+
+        -- Bật NoClip để bay xuyên vật cản
+        SetNoClip(true)
+        -- Tránh Humanoid tự chạm đất
+        pcall(function() hum:ChangeState(Enum.HumanoidStateType.Physics) end)
 
         pcall(function()
             CheckLevel()
@@ -490,7 +524,6 @@ task.spawn(function()
                 questVisible = true
             end
 
-            -- 1. Chưa có Quest -> Bay tới NPC
             if not questVisible then
                 _targetCF = CFrameQ * CFrame.new(0, _G.NPCHoverOffset, 0)
                 if (hrp.Position - CFrameQ.Position).Magnitude < 20 then
@@ -501,7 +534,6 @@ task.spawn(function()
                 return
             end
 
-            -- 2. Đã có Quest -> Tìm quái
             local targetMob = nil
             local enemies = Workspace:FindFirstChild("Enemies")
             if enemies then
@@ -523,7 +555,7 @@ task.spawn(function()
 end)
 
 -- ============================================================
--- MOVEMENT LOOP (BodyVelocity capped + BodyPosition Y-only)
+-- MOVEMENT LOOP (BodyVelocity XZ + BodyPosition Y-only)
 -- ============================================================
 task.spawn(function()
     while task.wait() do
@@ -540,22 +572,20 @@ task.spawn(function()
         if not hrp then continue end
         if not _targetCF then continue end
 
-        -- Init BodyVelocity (XZ only)
         if not bv or bv.Parent ~= hrp then
             if bv then bv:Destroy() end
             bv = Instance.new("BodyVelocity")
             bv.Name = "MangoVel"
-            bv.MaxForce = Vector3.new(math.huge, 0, math.huge)  -- XZ only
+            bv.MaxForce = Vector3.new(math.huge, 0, math.huge)
             bv.Velocity = Vector3.zero
             bv.Parent = hrp
         end
 
-        -- Init BodyPosition (Y only)
         if not bp or bp.Parent ~= hrp then
             if bp then bp:Destroy() end
             bp = Instance.new("BodyPosition")
             bp.Name = "MangoY"
-            bp.MaxForce = Vector3.new(0, math.huge, 0)  -- Y only
+            bp.MaxForce = Vector3.new(0, math.huge, 0)
             bp.P = 8000
             bp.D = 500
             bp.Position = hrp.Position
@@ -566,20 +596,17 @@ task.spawn(function()
         local horizDelta = Vector3.new(delta.X, 0, delta.Z)
         local horizDist = horizDelta.Magnitude
 
-        -- Long distance: teleport (single frame, server accepts)
         if horizDist > 1000 then
             local jumpPos = hrp.Position + horizDelta.Unit * 800
             hrp.CFrame = CFrame.new(jumpPos.X, hrp.Position.Y, jumpPos.Z)
             bv.Velocity = Vector3.zero
         elseif horizDist > 3 then
-            -- Speed capped at _G.HoverSpeed, slow down when close
             local speed = math.min(_G.HoverSpeed, horizDist * 4)
             bv.Velocity = horizDelta.Unit * speed
         else
             bv.Velocity = Vector3.zero
         end
 
-        -- Y-lock at target height
         bp.Position = Vector3.new(hrp.Position.X, _targetCF.Position.Y, hrp.Position.Z)
     end
 end)
@@ -683,4 +710,4 @@ SettingsTab:CreateToggle({
 })
 
 Rayfield:LoadConfiguration()
-print("[MANGO HUB] 🥭 V17 Loaded. BodyVelocity @ " .. _G.HoverSpeed .. " studs/s.")
+print("[MANGO HUB] 🥭 V18 Loaded. NoClip + Hover applied.")
