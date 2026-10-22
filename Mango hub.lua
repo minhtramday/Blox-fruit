@@ -1,5 +1,5 @@
 -- ============================================================
--- MANGO HUB 🥭 - V44 (Quest Lock - Không bay về NPC khi có Quest)
+-- MANGO HUB 🥭 - V45 (Direct Server Quest + BodyPosition Fly)
 -- By Minh Hub
 -- Yêu cầu executor: cloneref, bit32, sethiddenproperty
 -- ============================================================
@@ -8,7 +8,6 @@ local Players           = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace         = game:GetService("Workspace")
 local RunService        = game:GetService("RunService")
-local TweenService      = game:GetService("TweenService")
 local VirtualUser       = game:GetService("VirtualUser")
 
 local LP = Players.LocalPlayer
@@ -29,15 +28,18 @@ _G.FarAttackDelay  = 0.05
 _G.WeaponType      = "Melee"
 _G.UseBypass       = true
 _G.MobHoverHeight  = 5
-_G.FlySpeed        = 120
+_G.FlySpeed        = 100
 _G.BringMobs       = false
 
 -- State
-local _hasQuest = false          -- Khóa Quest: Đã có quest thì không bay về NPC
-local _questMissingTime = 0      -- Thời điểm bắt đầu mất Quest
+local _hasQuest = false
+local _questMissingTime = 0
 local _lastQuestTime = 0
-local _currentTween = nil
+local _targetCF = nil
 local Mon, NameMon, NameQuest, QuestLv, CFrameQ, CFrameMon
+
+-- Movers
+local bp, bg
 
 -- Boss Data
 local BossData = {
@@ -149,47 +151,6 @@ local function AutoHaki()
     if char and not char:FindFirstChild("HasBuso") then
         pcall(function() CommF:InvokeServer("Buso") end)
     end
-end
-
--- BKP: Teleport tức thời
-local function BKP(cf)
-    local char = LP.Character
-    if not char then return end
-    local hrp = char:FindFirstChild("HumanoidRootPart")
-    if not hrp then return end
-    pcall(function()
-        hrp.CFrame = cf
-        task.wait()
-        hrp.CFrame = cf
-    end)
-end
-
--- SAFE FLY: Bay mượt bằng TweenService
-local function SafeFly(targetCF)
-    if not targetCF then return end
-    local char = LP.Character
-    if not char then return end
-    local hrp = char:FindFirstChild("HumanoidRootPart")
-    if not hrp then return end
-
-    if _currentTween then
-        pcall(function() _currentTween:Cancel() end)
-        _currentTween = nil
-    end
-
-    local dist = (targetCF.Position - hrp.Position).Magnitude
-    if dist > 2000 then
-        hrp.CFrame = CFrame.new(hrp.Position + (targetCF.Position - hrp.Position).Unit * 1500)
-        dist = 500
-    end
-
-    local duration = math.max(dist / _G.FlySpeed, 0.1)
-    _currentTween = TweenService:Create(
-        hrp,
-        TweenInfo.new(duration, Enum.EasingStyle.Linear),
-        {CFrame = targetCF}
-    )
-    _currentTween:Play()
 end
 
 -- ============================================================
@@ -409,14 +370,14 @@ task.spawn(function()
 end)
 
 -- ============================================================
--- FARM LOOP (Quest Lock - Chống kéo về NPC)
+-- FARM LOOP (Direct StartQuest + BodyPosition Fly)
 -- ============================================================
 task.spawn(function()
-    while task.wait(0.5) do
+    while task.wait(0.1) do
         if not (_G.AutoFarmLevel or _G.AutoFarmBoss) then
             _hasQuest = false
             _questMissingTime = 0
-            _currentTween = nil
+            _targetCF = nil
             continue
         end
 
@@ -443,11 +404,11 @@ task.spawn(function()
                 end
 
                 if targetBoss then
-                    SafeFly(CFrame.new(targetBoss.HumanoidRootPart.Position.X, targetBoss.HumanoidRootPart.Position.Y + _G.MobHoverHeight, targetBoss.HumanoidRootPart.Position.Z))
+                    _targetCF = CFrame.new(targetBoss.HumanoidRootPart.Position.X, targetBoss.HumanoidRootPart.Position.Y + _G.MobHoverHeight, targetBoss.HumanoidRootPart.Position.Z)
                 else
                     local spawnCF = BossData[bossName]
                     if spawnCF then
-                        SafeFly(CFrame.new(spawnCF.X, spawnCF.Y + _G.MobHoverHeight, spawnCF.Z))
+                        _targetCF = CFrame.new(spawnCF.X, spawnCF.Y + _G.MobHoverHeight, spawnCF.Z)
                     end
                 end
                 return
@@ -463,36 +424,28 @@ task.spawn(function()
                     questVisible = LP.PlayerGui.Main.Quest.Visible
                 end)
 
-                -- QUEST LOCK LOGIC
+                -- Khóa Quest
                 if questVisible then
                     _hasQuest = true
                     _questMissingTime = 0
                 else
                     if _hasQuest then
-                        -- Đã có Quest nhưng UI ẩn đột ngột -> Đợi 3 giây
                         if _questMissingTime == 0 then
                             _questMissingTime = tick()
                         elseif (tick() - _questMissingTime) > 3 then
-                            -- Quá 3 giây không thấy Quest -> Mất Quest thật
                             _hasQuest = false
                             _questMissingTime = 0
                         end
                     end
                 end
 
-                -- Chưa có Quest -> Bay tới NPC
+                -- Chưa có Quest -> Dùng StartQuest Server-Side (Không bay về NPC)
                 if not _hasQuest then
-                    local distToNPC = (hrp.Position - CFrameQ.Position).Magnitude
-                    
-                    -- Chỉ gửi StartQuest khi gần NPC
-                    if distToNPC > 15 then
-                        SafeFly(CFrameQ)
-                    else
-                        if tick() - _lastQuestTime > 1 then
-                            _lastQuestTime = tick()
-                            CommF:InvokeServer("StartQuest", NameQuest, QuestLv)
-                        end
+                    if tick() - _lastQuestTime > 2 then
+                        _lastQuestTime = tick()
+                        CommF:InvokeServer("StartQuest", NameQuest, QuestLv)
                     end
+                    _targetCF = CFrame.new(CFrameMon.X, CFrameMon.Y + _G.MobHoverHeight, CFrameMon.Z)
                     return
                 end
 
@@ -515,11 +468,9 @@ task.spawn(function()
                 end
 
                 if targetMob then
-                    if nearestDist > 15 then
-                        SafeFly(CFrame.new(targetMob.HumanoidRootPart.Position.X, targetMob.HumanoidRootPart.Position.Y + _G.MobHoverHeight, targetMob.HumanoidRootPart.Position.Z))
-                    end
+                    _targetCF = CFrame.new(targetMob.HumanoidRootPart.Position.X, targetMob.HumanoidRootPart.Position.Y + _G.MobHoverHeight, targetMob.HumanoidRootPart.Position.Z)
                 else
-                    -- Không có quái -> Đứng im tại chỗ chờ
+                    _targetCF = CFrame.new(CFrameMon.X, CFrameMon.Y + _G.MobHoverHeight, CFrameMon.Z)
                 end
             end
         end)
@@ -527,53 +478,63 @@ task.spawn(function()
 end)
 
 -- ============================================================
--- NOCLIP LOOP
+-- MOVEMENT LOOP (BodyPosition - Bay mượt không rung)
 -- ============================================================
-RunService.Stepped:Connect(function()
-    if not (_G.AutoFarmLevel or _G.AutoFarmBoss) then return end
+RunService.Heartbeat:Connect(function()
+    if not (_G.AutoFarmLevel or _G.AutoFarmBoss) then
+        if bp then bp:Destroy(); bp = nil end
+        if bg then bg:Destroy(); bg = nil end
+        return
+    end
+
     local char = LP.Character
     if not char then return end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+
+    -- Noclip
     for _, v in ipairs(char:GetDescendants()) do
         if v:IsA("BasePart") and v.CanCollide then
             v.CanCollide = false
         end
     end
-end)
 
--- ============================================================
--- BODY CLIP (Chỉ bật khi có Quest)
--- ============================================================
-task.spawn(function()
-    while task.wait() do
-        pcall(function()
-            if _G.AutoFarmLevel or _G.AutoFarmBoss then
-                local char = LP.Character
-                if char then
-                    local hrp = char:FindFirstChild("HumanoidRootPart")
-                    if _hasQuest then
-                        if not hrp:FindFirstChild("BodyClip") then
-                            local bv = Instance.new("BodyVelocity")
-                            bv.Name = "BodyClip"
-                            bv.MaxForce = Vector3.new(100000, 100000, 100000)
-                            bv.Velocity = Vector3.new(0, 0, 0)
-                            bv.Parent = hrp
-                        end
-                    else
-                        if hrp:FindFirstChild("BodyClip") then
-                            hrp.BodyClip:Destroy()
-                        end
-                    end
-                end
-            else
-                local char = LP.Character
-                if char then
-                    local hrp = char:FindFirstChild("HumanoidRootPart")
-                    if hrp and hrp:FindFirstChild("BodyClip") then
-                        hrp.BodyClip:Destroy()
-                    end
-                end
-            end
-        end)
+    if not _targetCF then return end
+
+    -- Khởi tạo BodyPosition & BodyGyro
+    if not bp or bp.Parent ~= hrp then
+        if bp then bp:Destroy() end
+        bp = Instance.new("BodyPosition")
+        bp.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
+        bp.P = 10000
+        bp.D = 500
+        bp.Position = hrp.Position
+        bp.Parent = hrp
+    end
+
+    if not bg or bg.Parent ~= hrp then
+        if bg then bg:Destroy() end
+        bg = Instance.new("BodyGyro")
+        bg.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
+        bg.P = 10000
+        bg.D = 500
+        bg.CFrame = hrp.CFrame
+        bg.Parent = hrp
+    end
+
+    local dist = (hrp.Position - _targetCF.Position).Magnitude
+    if dist > 3 then
+        -- Nếu xa quá 2000 studs, dịch chuyển nhẹ 1 đoạn để tránh BodyPosition kéo văng
+        if dist > 2000 then
+            hrp.CFrame = CFrame.new(hrp.Position + (_targetCF.Position - hrp.Position).Unit * 1500)
+            dist = 500
+        end
+        bp.Position = _targetCF.Position
+        bg.CFrame = _targetCF
+    else
+        -- Đã tới nơi -> Ghim chặt
+        bp.Position = _targetCF.Position
+        bg.CFrame = _targetCF
     end
 end)
 
@@ -589,6 +550,7 @@ FarmTab:CreateToggle({
        if Value then _G.AutoFarmBoss = false end
        _hasQuest = false
        _questMissingTime = 0
+       _targetCF = nil
    end,
 })
 
@@ -600,16 +562,6 @@ FarmTab:CreateSlider({
    CurrentValue = 5,
    Flag = "MobHoverHeight",
    Callback = function(Value) _G.MobHoverHeight = Value end,
-})
-
-FarmTab:CreateSlider({
-   Name = "Fly Speed",
-   Range = {50, 200},
-   Increment = 10,
-   Suffix = "studs/s",
-   CurrentValue = 120,
-   Flag = "FlySpeed",
-   Callback = function(Value) _G.FlySpeed = Value end,
 })
 
 FarmTab:CreateToggle({
@@ -634,6 +586,7 @@ BossTab:CreateToggle({
    Callback = function(Value)
        _G.AutoFarmBoss = Value
        if Value then _G.AutoFarmLevel = false end
+       _targetCF = nil
    end,
 })
 
