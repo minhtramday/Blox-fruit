@@ -1,7 +1,7 @@
 -- ============================================================
--- MANGO HUB 🥭 - Rayfield UI + Hover Farm (V20 - Fix Quest Detect)
+-- MANGO HUB 🥭 - Rayfield UI + Hover Farm (V21 - Final NoClip Fly)
 -- Yêu cầu executor: cloneref, bit32, sethiddenproperty
--- Đã sửa: Check XZ, Y lấy trực tiếp từ target, không ChangeState.
+-- Đã sửa: NoClip liên tục + Teleport chunk 5 studs + bay tới mob sau quest.
 -- ============================================================
 
 local Players           = game:GetService("Players")
@@ -42,7 +42,7 @@ local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
 local Window = Rayfield:CreateWindow({
    Name = "MANGO HUB 🥭",
-   LoadingTitle = "Mango Hub V20",
+   LoadingTitle = "Mango Hub V21",
    LoadingSubtitle = "by AI",
    ConfigurationSaving = { Enabled = false },
    KeySystem = false,
@@ -82,30 +82,18 @@ LP.Idled:Connect(function()
 end)
 
 -- ============================================================
--- NOCLIP
+-- NOCLIP (Giữ theo cơ chế bạn yêu cầu)
 -- ============================================================
 RunService.Stepped:Connect(function()
-    if not _noclipActive then return end
     local char = LP.Character
     if not char then return end
-    for _, v in ipairs(char:GetDescendants()) do
-        if v:IsA("BasePart") and v.CanCollide then
-            v.CanCollide = false
+    if not _G.AutoFarmLevel then return end -- Chỉ noclip khi farm
+    for _, part in ipairs(char:GetDescendants()) do
+        if part:IsA("BasePart") then
+            part.CanCollide = false
         end
     end
 end)
-
-local function SetNoClip(state)
-    _noclipActive = state
-    if state then return end
-    local char = LP.Character
-    if not char then return end
-    for _, v in ipairs(char:GetDescendants()) do
-        if v:IsA("BasePart") then
-            v.CanCollide = true
-        end
-    end
-end
 
 -- ============================================================
 -- HELPERS
@@ -483,14 +471,13 @@ task.spawn(function()
 end)
 
 -- ============================================================
--- FARM LOOP (XZ Check, Y trực tiếp từ target)
+-- FARM LOOP (Đã fix nhận quest -> bay tới mob)
 -- ============================================================
 task.spawn(function()
     while task.wait(0.1) do
         if not _G.AutoFarmLevel then
             _targetCF = nil
             _isStartingQuest = false
-            SetNoClip(false)
             continue
         end
 
@@ -499,8 +486,6 @@ task.spawn(function()
         local hum = char:FindFirstChildOfClass("Humanoid")
         local hrp = char:FindFirstChild("HumanoidRootPart")
         if not hum or not hrp or hum.Health <= 0 then continue end
-
-        SetNoClip(true)
 
         pcall(function()
             CheckLevel()
@@ -511,26 +496,26 @@ task.spawn(function()
                 questVisible = LP.PlayerGui.Main.Quest.Visible
             end)
 
+            -- Nếu đang chờ quest load, coi như đã có
             if _isStartingQuest then questVisible = true end
 
-            -- Chưa có Quest -> NPC
+            -- 1. Chưa có Quest -> Tới NPC
             if not questVisible then
                 local npcY = CFrameQ.Y + _G.NPCHoverOffset
                 _targetCF = CFrame.new(CFrameQ.X, npcY, CFrameQ.Z)
-
-                -- Check XZ (bỏ qua Y)
-                local xzDist = (Vector2.new(hrp.Position.X, hrp.Position.Z)
-                    - Vector2.new(CFrameQ.X, CFrameQ.Z)).Magnitude
-                if xzDist < 15 then
+                
+                -- Check XZ để gọi StartQuest
+                local xzDist = (Vector2.new(hrp.Position.X, hrp.Position.Z) - Vector2.new(CFrameQ.X, CFrameQ.Z)).Magnitude
+                if xzDist < 15 and not _isStartingQuest then
                     _isStartingQuest = true
                     ReplicatedStorage.Remotes.CommF_:InvokeServer("StartQuest", NameQuest, QuestLv)
-                    task.wait(1)
-                    _isStartingQuest = false
+                    task.wait(1.5) -- Chờ server xử lý
+                    _isStartingQuest = false -- Bỏ cờ để lần sau check quest thật
                 end
                 return
             end
 
-            -- Có Quest -> Tìm mob
+            -- 2. Đã có Quest -> Tìm mob
             local targetMob = nil
             local enemies = Workspace:FindFirstChild("Enemies")
             if enemies then
@@ -546,6 +531,7 @@ task.spawn(function()
                 local mobY = targetMob.HumanoidRootPart.Position.Y + _G.MobHoverHeight
                 _targetCF = CFrame.new(targetMob.HumanoidRootPart.Position.X, mobY, targetMob.HumanoidRootPart.Position.Z)
             else
+                -- Không thấy quái -> Bay tới điểm spawn (CFrameMon) chờ
                 local spawnY = CFrameMon.Y + _G.MobHoverHeight
                 _targetCF = CFrame.new(CFrameMon.X, spawnY, CFrameMon.Z)
             end
@@ -554,7 +540,7 @@ task.spawn(function()
 end)
 
 -- ============================================================
--- MOVEMENT LOOP (Teleport chunk 5 studs / 0.05s, xuyên tường)
+-- MOVEMENT LOOP (Teleport chunk 5 studs/0.05s - Xuyên vật cản)
 -- ============================================================
 task.spawn(function()
     while task.wait(0.05) do
@@ -563,7 +549,7 @@ task.spawn(function()
         local char = LP.Character
         if not char then continue end
         local hrp = char:FindFirstChild("HumanoidRootPart")
-        if not hrp then continue end
+        if not hrp then return end
 
         local tgtY = _targetCF.Position.Y
         local curXZ = Vector3.new(hrp.Position.X, 0, hrp.Position.Z)
@@ -571,23 +557,23 @@ task.spawn(function()
         local delta = tgtXZ - curXZ
         local dist = delta.Magnitude
 
-        if dist > 1 then
+        if dist > 2 then
+            -- Teleport 5 studs mỗi 0.05s (100 studs/s), bỏ qua vật cản
             local step = math.min(5, dist)
-            local dir = delta.Unit
-            local newXZ = curXZ + dir * step
+            local newXZ = curXZ + delta.Unit * step
             hrp.CFrame = CFrame.new(Vector3.new(newXZ.X, tgtY, newXZ.Z))
         else
+            -- Đã tới, ghim chặt vị trí
             hrp.CFrame = CFrame.new(Vector3.new(hrp.Position.X, tgtY, hrp.Position.Z))
         end
     end
 end)
 
 -- ============================================================
--- HEARTBEAT (Chống rớt)
+-- HEARTBEAT (Chống rớt Y)
 -- ============================================================
 RunService.Heartbeat:Connect(function()
     if not _G.AutoFarmLevel or not _targetCF then return end
-
     local char = LP.Character
     if not char then return end
     local hrp = char:FindFirstChild("HumanoidRootPart")
@@ -701,4 +687,4 @@ SettingsTab:CreateToggle({
 })
 
 Rayfield:LoadConfiguration()
-print("[MANGO HUB] 🥭 V20 Loaded. XZ check + Y direct.")
+print("[MANGO HUB] 🥭 V21 Loaded. Noclip + Teleport chunk.")
