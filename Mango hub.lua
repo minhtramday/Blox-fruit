@@ -1,5 +1,5 @@
 -- ============================================================
--- MANGO HUB 🥭 - V55 (True 1B Radius + No Abandon)
+-- MANGO HUB 🥭 - V57 (100% Original Logic)
 -- By Minh Hub
 -- Yêu cầu executor: cloneref, bit32, sethiddenproperty
 -- ============================================================
@@ -17,14 +17,14 @@ local RE_Hit    = Net:WaitForChild("RE/RegisterHit")
 local CommF     = ReplicatedStorage.Remotes.CommF_
 
 -- ============================================================
--- CẤU HÌNH CHUẨN
+-- CẤU HÌNH FILE GỐC
 -- ============================================================
 _G.TuDanhXa       = true
 _G.TuDongCayCap   = false
 _G.TuDongDanhBoss = false
 _G.ChonBoss       = "The Gorilla King"
-_G.BanKinhDanh    = 1000000000 -- 1 tỷ studs
-_G.TocDoDanh      = 1e-9       -- Tốc độ ánh sáng
+_G.BanKinhDanh    = 60
+_G.TocDoDanh      = 1e-9
 _G.LoaiVuKhi      = "Melee"
 _G.DungBypass     = true
 _G.DoCaoLoLung    = 30
@@ -32,9 +32,9 @@ _G.GomQuai        = true
 
 -- Biến trạng thái
 local _lastQuestTime = 0
-local _questSent = false
 local Mon, NameMon, NameQuest, QuestLv
 local _farmPos = nil
+local _monFarm = nil
 
 -- Dữ liệu Boss
 local BossData = {
@@ -148,6 +148,7 @@ local function AutoHaki()
     end
 end
 
+-- HÀM BKP TỪ FILE GỐC
 local function BKP(cf)
     local char = LP.Character
     if not char then return end
@@ -240,9 +241,9 @@ function CheckLevel()
 end
 
 -- ============================================================
--- QUÉT & BẮN HIT (Bán kính 1 tỷ)
+-- QUÉT & BẮN HIT
 -- ============================================================
-local function scanTargets(radius)
+local function scanTargets(radius, targetName)
     local char = LP.Character
     if not char then return {}, nil end
     local hrp = char:FindFirstChild("HumanoidRootPart")
@@ -256,14 +257,15 @@ local function scanTargets(radius)
             if mob ~= char then
                 local mhrp = mob:FindFirstChild("HumanoidRootPart")
                 local mhum = mob:FindFirstChild("Humanoid")
-                -- Bán kính 1 tỷ studs (quét toàn bộ Workspace.Enemies)
-                if mhrp and mhum and mhum.Health > 0 and (mhrp.Position - origin).Magnitude <= 1000000000 then
-                    for _, part in ipairs(mob:GetChildren()) do
-                        if part:IsA("BasePart") then
-                            table.insert(list, {mob, part})
+                if mhrp and mhum and mhum.Health > 0 and (mhrp.Position - origin).Magnitude <= radius then
+                    if not targetName or string.find(mob.Name, targetName) then
+                        for _, part in ipairs(mob:GetChildren()) do
+                            if part:IsA("BasePart") then
+                                table.insert(list, {mob, part})
+                            end
                         end
+                        if not firstHead then firstHead = mob:FindFirstChild("Head") or mhrp end
                     end
-                    if not firstHead then firstHead = mob:FindFirstChild("Head") or mhrp end
                 end
             end
         end
@@ -299,7 +301,7 @@ local function fireHit(head, list)
 end
 
 -- ============================================================
--- VÒNG LẶP ĐÁNH (Tốc độ 1e-9)
+-- VÒNG LẶP ĐÁNH (Sử dụng đúng vòng lặp của file gốc)
 -- ============================================================
 task.spawn(function()
     while task.wait(1e-9) do
@@ -314,39 +316,43 @@ task.spawn(function()
         if w then equipWeapon(w) end
         AutoHaki()
 
-        local list, head = scanTargets(1000000000)
+        -- Lấy tên mục tiêu (nếu đang farm)
+        local targetName = nil
+        if _G.TuDongDanhBoss then
+            targetName = _G.ChonBoss
+        elseif _G.TuDongCayCap then
+            targetName = Mon
+        end
+
+        -- Quét quái
+        local list, head = scanTargets(_G.BanKinhDanh, targetName)
+        
+        -- Nếu danh sách trống, thử quét lại không lọc tên (nếu chỉ bật AutoFarAttack)
+        if #list == 0 and not _G.TuDongCayCap and not _G.TuDongDanhBoss then
+            list, head = scanTargets(_G.BanKinhDanh, nil)
+        end
+
         if #list == 0 then continue end
 
-        -- Gom quái (Chỉ gom đúng tên nhiệm vụ)
+        -- Gom quái (Nếu bật) - Chỉ gom nếu đúng tên
         if _G.GomQuai then
             local hrp = char:FindFirstChild("HumanoidRootPart")
             if hrp then
                 local gatherPos = CFrame.new(hrp.Position.X, hrp.Position.Y - 3, hrp.Position.Z)
                 for _, t in ipairs(list) do
-                    local isTarget = false
-                    if _G.TuDongCayCap and string.find(t[1].Name, Mon) then
-                        isTarget = true
-                    elseif _G.TuDongDanhBoss and string.find(t[1].Name, _G.ChonBoss) then
-                        isTarget = true
-                    elseif not _G.TuDongCayCap and not _G.TuDongDanhBoss then
-                        isTarget = true
-                    end
-
-                    if isTarget then
-                        pcall(function()
-                            if t[2] and t[2].Parent then
-                                t[2].CFrame = gatherPos
-                                t[2].CanCollide = false
-                                local h = t[1]:FindFirstChildOfClass("Humanoid")
-                                if h then
-                                    h.WalkSpeed = 0
-                                    h.JumpPower = 0
-                                    local anim = h:FindFirstChild("Animator")
-                                    if anim then anim:Destroy() end
-                                end
+                    pcall(function()
+                        if t[2] and t[2].Parent then
+                            t[2].CFrame = gatherPos
+                            t[2].CanCollide = false
+                            local h = t[1]:FindFirstChildOfClass("Humanoid")
+                            if h then
+                                h.WalkSpeed = 0
+                                h.JumpPower = 0
+                                local anim = h:FindFirstChild("Animator")
+                                if anim then anim:Destroy() end
                             end
-                        end)
-                    end
+                        end
+                    end)
                 end
                 pcall(function() sethiddenproperty(LP, "SimulationRadius", math.huge) end)
             end
@@ -358,7 +364,7 @@ task.spawn(function()
 end)
 
 -- ============================================================
--- VÒNG LẶP CÀY CẤP / BOSS
+-- VÒNG LẶP CÀY CẤP / BOSS (Quest Logic từ file gốc)
 -- ============================================================
 task.spawn(function()
     while task.wait(0.1) do
@@ -370,7 +376,6 @@ task.spawn(function()
                     hrp.BodyClip:Destroy()
                 end
             end
-            _questSent = false
             continue
         end
 
@@ -381,7 +386,7 @@ task.spawn(function()
         if not hum or not hrp or hum.Health <= 0 then continue end
 
         pcall(function()
-            -- Bật BodyClip
+            -- Tạo BodyClip chống kéo (từ file gốc)
             if not hrp:FindFirstChild("BodyClip") then
                 local bv = Instance.new("BodyVelocity")
                 bv.Name = "BodyClip"
@@ -413,6 +418,7 @@ task.spawn(function()
                 end
 
                 if targetBoss then
+                    -- BKP tới boss
                     BKP(CFrame.new(targetBoss.HumanoidRootPart.Position.X, targetBoss.HumanoidRootPart.Position.Y + _G.DoCaoLoLung, targetBoss.HumanoidRootPart.Position.Z))
                     _farmPos = targetBoss.HumanoidRootPart.CFrame
                 else
@@ -430,15 +436,25 @@ task.spawn(function()
                 if not Mon then return end
 
                 local questVisible = false
+                local questText = ""
                 pcall(function()
                     questVisible = LP.PlayerGui.Main.Quest.Visible
+                    if questVisible then
+                        questText = LP.PlayerGui.Main.Quest.Container.QuestTitle.Title.Text
+                    end
                 end)
 
-                -- CHỈ gửi StartQuest nếu CHƯA CÓ Quest
-                if not questVisible and not _questSent then
-                    _questSent = true
-                    CommF:InvokeServer("StartQuest", NameQuest, QuestLv)
-                    task.delay(2, function() _questSent = false end)
+                -- Logic từ file gốc: Nếu có Quest nhưng sai tên thì Abandon
+                if questVisible and questText ~= "" and not string.find(questText, NameMon) then
+                    CommF:InvokeServer("AbandonQuest")
+                end
+
+                -- Nhận Quest nếu chưa có (dùng Server-Side từ xa)
+                if not questVisible then
+                    if tick() - _lastQuestTime > 2 then
+                        _lastQuestTime = tick()
+                        CommF:InvokeServer("StartQuest", NameQuest, QuestLv)
+                    end
                 end
 
                 -- Tìm quái
@@ -457,11 +473,10 @@ task.spawn(function()
                 end
 
                 if targetMob then
-                    local dist = (targetMob.HumanoidRootPart.Position - hrp.Position).Magnitude
-                    if dist > 15 then
-                        BKP(CFrame.new(targetMob.HumanoidRootPart.Position.X, targetMob.HumanoidRootPart.Position.Y + _G.DoCaoLoLung, targetMob.HumanoidRootPart.Position.Z))
-                    end
+                    -- BKP tới quái (từ file gốc)
+                    BKP(CFrame.new(targetMob.HumanoidRootPart.Position.X, targetMob.HumanoidRootPart.Position.Y + _G.DoCaoLoLung, targetMob.HumanoidRootPart.Position.Z))
                     _farmPos = targetMob.HumanoidRootPart.CFrame
+                    _monFarm = targetMob.Name
                 end
             end
         end)
@@ -478,7 +493,6 @@ TabCayCap:CreateToggle({
    Callback = function(Value)
        _G.TuDongCayCap = Value
        if Value then _G.TuDongDanhBoss = false end
-       _questSent = false
    end,
 })
 
@@ -525,13 +539,13 @@ TabCaiDat:CreateToggle({
 })
 
 TabCaiDat:CreateSlider({
-   Name = "Tốc Độ Đánh",
-   Range = {0.000000001, 1},
-   Increment = 0.000000001,
-   Suffix = "s",
-   CurrentValue = 0.000000001,
-   Flag = "TocDoDanh",
-   Callback = function(Value) _G.TocDoDanh = Value end,
+   Name = "Bán Kính Đánh",
+   Range = {20, 200},
+   Increment = 5,
+   Suffix = "studs",
+   CurrentValue = 60,
+   Flag = "BanKinhDanh",
+   Callback = function(Value) _G.BanKinhDanh = Value end,
 })
 
 TabCaiDat:CreateDropdown({
@@ -550,4 +564,4 @@ TabCaiDat:CreateToggle({
 })
 
 Rayfield:LoadConfiguration()
-print("[MANGO HUB] 🥭 Loaded. By Minh Hub. V55.")
+print("[MANGO HUB] 🥭 Loaded. By Minh Hub. V57 - 100% Original Logic.")
